@@ -2,6 +2,7 @@
 pub enum CompileError {
     // Parser errors
     MissingSemicolon(String),
+    MissingSignalType { r#for: String },
     UnexpectedPattern(String),
     InvalidIdentifier(String),
     UnexpectedToken(String),
@@ -14,5 +15,6 @@ pub enum CompileError {
 
     // Codegen errors
     UndefinedVariable(String),
+    ExpectedConstantSignal { found: String },
     OutOfRegisters,
 }

@@ -4,7 +4,7 @@ use crate::asm::*;
 use crate::mem::*;
 
 use crate::{
-    ast::{Expression, Let as LetStmt, Program, Statement},
+    ast::{Expression, LetStmt, Program, Statement},
     error::CompileError,
     symbol::SymbolTable,
 };
@@ -16,6 +16,7 @@ pub struct Generator {
     program: Program,
     registors: RegisterAllocator,
     stack: StackAllocator,
+    outputs: OutputManager,
 }
 
 impl Generator {
@@ -30,65 +31,74 @@ impl Generator {
         for stmt in self.program.clone() {
             match stmt {
                 Statement::Let(let_stmt) => {
-                    let reg = self.registors.alloc().unwrap();
-                    self.gen_expr(reg, &let_stmt).unwrap();
+                    let LetStmt { ident, sigid, expr } = let_stmt;
+                    let reg = self.proc_expr(&expr, &sigid).unwrap();
+                    self.symbols.insert(
+                        ident.to_string(),
+                        Variable::new(ident.to_string(), reg, None, sigid),
+                    );
                 }
-                Statement::OutNum(value, signal) => {
-                    let reg = self.registors.alloc().unwrap();
-                    let signal = signal.map(|s| s.format());
-                    self.asm.out_item(Out(reg), &value, &signal);
-                }
-                Statement::OutVar(ident) => match self.symbols.get(&ident) {
-                    Some(var) => {
-                        if let Some(value) = var.value {
-                            let signal = var.signal.map(|s| s.format());
-                            self.asm.out_item(Out(var.reg), &value, &signal);
-                        }
+                Statement::Out(signal) => match signal.value {
+                    crate::ast::SignalValue::Num(scalar) => {
+                        let signal = signal.id.map(|s| s.format());
+                        self.asm.out_item(self.outputs.out(), &scalar, &signal);
                     }
-                    None => {
-                        return Err(CompileError::UndefinedVariable(ident.clone()));
+                    crate::ast::SignalValue::Var(ident) => {
+                        if let Some(var) = self.symbols.get(&ident) {
+                            match signal.id {
+                                Some(sigid) => {
+                                    let tmp = self.registors.alloc().unwrap();
+                                    self.asm.reg_item(tmp, &1, &Some(sigid.format()));
+                                    self.asm.mul(tmp, var.reg);
+                                    self.asm.clr(Some(tmp));
+                                }
+                                None => {
+                                    self.asm.out_reg(self.outputs.out(), var.reg);
+                                }
+                            }
+                        } else {
+                            return Err(CompileError::UndefinedVariable(ident.clone()));
+                        }
                     }
                 },
             }
         }
 
-        dbg!(&self.symbols);
-        dbg!(&self.registors);
         Ok(self.asm.finish())
     }
 
-    fn gen_expr(&mut self, reg: Register, let_stmt: &LetStmt) -> Result<(), CompileError> {
-        let LetStmt {
-            ident,
-            signal,
-            expr,
-        } = let_stmt;
-
+    fn proc_expr(
+        &mut self,
+        expr: &Expression,
+        parent_sigid: &Option<crate::game::SignalId>,
+    ) -> Result<Register, CompileError> {
         match expr {
-            Expression::Num(n) => {
-                let variable = Variable::new(ident.to_string(), reg, None, Some(*n), *signal);
-                self.symbols.insert(ident.clone(), variable);
-                self.asm.reg_item(reg, n, &signal.map(|s| s.format()));
+            Expression::Value(signal) => {
+                let reg = self.registors.alloc().unwrap();
+                match &signal.value {
+                    crate::ast::SignalValue::Num(n) => {
+                        self.asm.reg_item(reg, n, &parent_sigid.map(|s| s.format()));
+                    }
+                    crate::ast::SignalValue::Var(r_ident) => match self.symbols.get(r_ident) {
+                        Some(var) => {
+                            let dst = reg;
+                            let src = var.reg;
+                            self.asm.mov(dst, src);
+                        }
+                        None => {
+                            return Err(CompileError::UndefinedVariable(r_ident.clone()));
+                        }
+                    },
+                }
+
+                Ok(reg)
             }
-            Expression::Var(r_ident) => match self.symbols.get(r_ident) {
-                Some(var) => {
-                    let dst = reg;
-                    let src = var.reg;
-                    self.asm.mov(dst, src);
-                }
-                None => {
-                    return Err(CompileError::UndefinedVariable(r_ident.clone()));
-                }
-            },
             Expression::Op { lhs, rhs, op } => {
-                let lhs_reg = reg;
-                let rhs_reg = self.registors.alloc().unwrap();
+                let lhs = (lhs.deref()).clone();
+                let rhs = (rhs.deref()).clone();
 
-                let lhs_stmt = LetStmt::new("tmp".to_string(), None, (lhs.deref()).clone());
-                let rhs_stmt = LetStmt::new("tmp".to_string(), None, (rhs.deref()).clone());
-
-                self.gen_expr(lhs_reg, &lhs_stmt).unwrap();
-                self.gen_expr(rhs_reg, &rhs_stmt).unwrap();
+                let lhs_reg = self.proc_expr(&lhs, parent_sigid).unwrap();
+                let rhs_reg = self.proc_expr(&rhs, parent_sigid).unwrap();
 
                 match op {
                     crate::ast::Sign::Add => self.asm.add(lhs_reg, rhs_reg),
@@ -110,14 +120,9 @@ impl Generator {
                 if let Some(key) = lhs_entry {
                     self.symbols.remove(&key);
                 }
+
+                Ok(lhs_reg)
             }
         }
-
-        self.symbols.insert(
-            ident.to_string(),
-            Variable::new(ident.to_string(), reg, None, None, *signal),
-        );
-
-        Ok(())
     }
 }

@@ -18,13 +18,13 @@ impl Asm {
         }
     }
 
-    pub fn mov<D, S>(&mut self, op0: D, op1: S)
+    pub fn mov<D, S>(&mut self, dst: D, src: S)
     where
         S: std::fmt::Display,
         D: std::fmt::Display,
     {
         #[allow(clippy::to_string_in_format_args)]
-        self.code.push_str(&format!("mov {} {}\n", op0, op1));
+        self.code.push_str(&format!("mov {} {}\n", dst, src));
     }
 
     pub fn clr<T>(&mut self, dst: Option<T>)

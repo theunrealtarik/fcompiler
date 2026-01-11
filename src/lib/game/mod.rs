@@ -1,16 +1,16 @@
 use convert_case::{Case, Casing};
 use std::str::FromStr;
 
-pub mod signals;
+mod signals;
 
 #[derive(Debug, Clone, Copy)]
-pub enum Signal {
+pub enum SignalId {
     Item(signals::Item),
     Fluid(signals::Fluid),
     Virtual(signals::Virtual),
 }
 
-impl Signal {
+impl SignalId {
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(str: &str) -> Result<Self, std::io::ErrorKind> {
         if let Ok(signal) = signals::Item::from_str(str) {
@@ -30,18 +30,18 @@ impl Signal {
 
     pub fn name(&self) -> String {
         match self {
-            Signal::Item(item) => item.to_string(),
-            Signal::Fluid(fluid) => fluid.to_string(),
-            Signal::Virtual(r#virtual) => r#virtual.to_string(),
+            SignalId::Item(item) => item.to_string(),
+            SignalId::Fluid(fluid) => fluid.to_string(),
+            SignalId::Virtual(r#virtual) => r#virtual.to_string(),
         }
         .to_case(Case::Kebab)
     }
 
     pub fn category(&self) -> String {
         match self {
-            Signal::Item(item) => item.category(),
-            Signal::Fluid(fluid) => fluid.category(),
-            Signal::Virtual(r#virtual) => r#virtual.category(),
+            SignalId::Item(item) => item.category(),
+            SignalId::Fluid(fluid) => fluid.category(),
+            SignalId::Virtual(r#virtual) => r#virtual.category(),
         }
     }
 

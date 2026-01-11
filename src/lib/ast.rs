@@ -1,10 +1,9 @@
-use crate::game::Signal;
+use crate::{error::CompileError, game::SignalId};
 
 #[derive(Debug, Clone)]
 pub enum Statement {
-    Let(Let),
-    OutVar(String),
-    OutNum(i32, Option<Signal>),
+    Let(LetStmt),
+    Out(Signal),
 }
 
 #[derive(Debug, Default, Clone)]
@@ -42,8 +41,7 @@ impl From<Vec<Statement>> for Program {
 
 #[derive(Debug, Clone)]
 pub enum Expression {
-    Num(i32),
-    Var(String),
+    Value(Signal),
     Op {
         lhs: Box<Expression>,
         rhs: Box<Expression>,
@@ -61,18 +59,67 @@ pub enum Sign {
 }
 
 #[derive(Debug, Clone)]
-pub struct Let {
+pub struct LetStmt {
     pub ident: String,
-    pub signal: Option<Signal>,
+    pub sigid: Option<SignalId>,
     pub expr: Expression,
 }
 
-impl Let {
-    pub fn new(name: String, signal: Option<Signal>, expr: Expression) -> Self {
-        Self {
-            ident: name,
-            signal,
-            expr,
+impl LetStmt {
+    pub fn new(ident: String, sigid: Option<SignalId>, expr: Expression) -> Self {
+        Self { ident, sigid, expr }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct Signal {
+    pub value: SignalValue,
+    pub id: Option<SignalId>,
+}
+
+impl Signal {
+    pub fn new(value: SignalValue, id: Option<SignalId>) -> Self {
+        Self { value, id }
+    }
+}
+
+impl TryInto<i32> for Signal {
+    type Error = CompileError;
+
+    fn try_into(self) -> Result<i32, Self::Error> {
+        match self.value {
+            SignalValue::Num(n) => Ok(n),
+            SignalValue::Var(ident) => Err(CompileError::ExpectedConstantSignal { found: ident }),
         }
+    }
+}
+
+impl From<i32> for Signal {
+    fn from(value: i32) -> Self {
+        Self {
+            value: SignalValue::Num(value),
+            id: None,
+        }
+    }
+}
+
+impl From<String> for Signal {
+    fn from(v: String) -> Self {
+        Self {
+            value: SignalValue::Var(v),
+            id: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum SignalValue {
+    Num(i32),
+    Var(String),
+}
+
+impl Default for SignalValue {
+    fn default() -> Self {
+        Self::Num(0)
     }
 }

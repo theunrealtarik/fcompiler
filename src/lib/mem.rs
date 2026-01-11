@@ -140,8 +140,7 @@ pub struct Variable {
     pub name: String,
     pub reg: Register,
     pub slot: Option<u8>,
-    pub value: Option<i32>,
-    pub signal: Option<crate::game::Signal>,
+    pub signal: Option<crate::game::SignalId>,
 }
 
 impl Variable {
@@ -149,14 +148,12 @@ impl Variable {
         name: String,
         reg: Register,
         slot: Option<u8>,
-        value: Option<i32>,
-        signal: Option<crate::game::Signal>,
+        signal: Option<crate::game::SignalId>,
     ) -> Self {
         Self {
             name,
             reg,
             slot,
-            value,
             signal,
         }
     }
@@ -164,10 +161,10 @@ impl Variable {
 
 // out
 #[derive(Debug, Clone, Copy)]
-pub struct Out(pub Register);
+pub struct Out(pub u8);
 
 impl std::ops::Deref for Out {
-    type Target = Register;
+    type Target = u8;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -182,6 +179,18 @@ impl std::ops::DerefMut for Out {
 
 impl std::fmt::Display for Out {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "out{}", self.0 as u8 + 1)
+        write!(f, "out{}", self.0)
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct OutputManager {
+    last: u8,
+}
+
+impl OutputManager {
+    pub fn out(&mut self) -> Out {
+        self.last += 1;
+        Out(self.last)
     }
 }

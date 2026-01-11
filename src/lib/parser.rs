@@ -1,9 +1,12 @@
-use crate::error::CompileError;
+use crate::{
+    ast::{Signal, SignalValue},
+    error::CompileError,
+};
 use core::panic;
 
 use crate::{
-    ast::{Expression, Let as LetStmt, Program, Statement},
-    game::Signal,
+    ast::{Expression, LetStmt, Program, Statement},
+    game::SignalId,
 };
 
 pub fn parse(src: &str) -> Result<Program, CompileError> {
@@ -25,20 +28,31 @@ pub fn parse(src: &str) -> Result<Program, CompileError> {
 
             let (ident, signal_type) = inner
                 .split_once(",")
-                .map(|(n, t)| (n.trim(), Signal::from_str(t.trim()).ok()))
+                .map(|(n, t)| (n.trim(), SignalId::from_str(t.trim()).ok()))
                 .unwrap_or_else(|| (inner, None));
 
+            let mut signal = Signal::default();
             match ident.parse::<i32>() {
-                Ok(num) => stmts.push(Statement::OutNum(num, signal_type)),
+                Ok(num) => {
+                    if signal_type.is_none() {
+                        return Err(CompileError::MissingSignalType {
+                            r#for: ident.to_string(),
+                        });
+                    }
+
+                    signal = Signal::from(num);
+                }
                 Err(_) => {
                     if validate_identifier(ident) {
-                        stmts.push(Statement::OutVar(String::from(ident)));
+                        signal.value = SignalValue::Var(ident.to_string());
                     } else {
                         return Err(CompileError::InvalidIdentifier(format!("(line: {})", idx)));
                     }
                 }
             }
 
+            signal.id = signal_type;
+            stmts.push(Statement::Out(signal));
             continue;
         }
 
@@ -47,9 +61,9 @@ pub fn parse(src: &str) -> Result<Program, CompileError> {
             let rest = &line[4..line.len() - 1];
             let (ident, expr) = rest.trim().split_once("=").unwrap();
 
-            let (ident, signal_type) = ident
+            let (ident, signal_id) = ident
                 .split_once(":")
-                .map(|(n, t)| (n.trim(), Signal::from_str(t.trim()).ok()))
+                .map(|(n, t)| (n.trim(), SignalId::from_str(t.trim()).ok()))
                 .unwrap_or_else(|| (ident.trim(), None));
 
             if !validate_identifier(ident) {
@@ -61,7 +75,7 @@ pub fn parse(src: &str) -> Result<Program, CompileError> {
 
             stmts.push(Statement::Let(LetStmt::new(
                 String::from(ident),
-                signal_type,
+                signal_id,
                 expr,
             )));
             continue;
@@ -243,8 +257,8 @@ impl<'a> Parser<'a> {
 
     pub fn parse_leaf(&mut self) -> Result<Expression, CompileError> {
         match self.next() {
-            Some(Token::Number(n)) => Ok(Expression::Num(*n)),
-            Some(Token::Ident(name)) => Ok(Expression::Var(name.clone())),
+            Some(Token::Number(n)) => Ok(Expression::Value(Signal::from(*n))),
+            Some(Token::Ident(name)) => Ok(Expression::Value(Signal::from(name.to_string()))),
             Some(Token::LParen) => {
                 let expr = self.parse_expression(0);
                 match self.next() {
