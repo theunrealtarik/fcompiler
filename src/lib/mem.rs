@@ -1,7 +1,4 @@
-use std::collections::HashSet;
-
 // cpu registers (64 registers)
-static MAX_REGISTERS: u8 = 63;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -11,8 +8,8 @@ impl TryFrom<u8> for Register {
     type Error = crate::error::CompileError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        if value > MAX_REGISTERS {
-            return Err(crate::error::CompileError::RegistersExceedLimit);
+        if value > RegisterAllocator::MAX_REGISTERS {
+            return Err(crate::error::CompileError::InvalidRegister);
         }
 
         Ok(Self(value))
@@ -45,6 +42,8 @@ impl Default for RegisterAllocator {
 }
 
 impl RegisterAllocator {
+    pub const MAX_REGISTERS: u8 = 63;
+
     pub fn new() -> Self {
         Self { free: u64::MAX }
     }
@@ -61,12 +60,32 @@ impl RegisterAllocator {
     }
 
     pub fn free(&mut self, r: Register) {
-        if *r >= MAX_REGISTERS {
+        if *r >= Self::MAX_REGISTERS {
+            return;
+        }
+
+        if !self.is_used(r) {
             return;
         }
 
         let mask = 1u64 << *r;
         self.free |= mask;
+    }
+
+    pub fn is_used(&self, r: Register) -> bool {
+        self.free & (1 << *r) == 0
+    }
+
+    pub fn is_free(&self, r: Register) -> bool {
+        self.free & (1 << *r) != 0
+    }
+
+    pub fn free_regs(&self) -> u32 {
+        self.free.count_ones()
+    }
+
+    pub fn used_regs(&self) -> u32 {
+        self.free.count_ones()
     }
 }
 

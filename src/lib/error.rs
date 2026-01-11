@@ -17,8 +17,7 @@ pub enum CompileError {
     UndefinedVariable(String),
     ExpectedConstantSignal { found: String },
     OutOfRegisters,
-
-    // Runtime errors
-    StackOverflow,
-    RegistersExceedLimit,
+    RegisterDoubleFree(u8),
+    RegisterNotAllocated(u8),
+    InvalidRegister,
 }
