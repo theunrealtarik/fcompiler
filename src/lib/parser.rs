@@ -5,7 +5,7 @@ use crate::{
 use core::panic;
 
 use crate::{
-    ast::{Expression, LetStmt, Program, Statement},
+    ast::{Expression, Program, Statement},
     game::SignalId,
 };
 
@@ -73,11 +73,11 @@ pub fn parse(src: &str) -> Result<Program, CompileError> {
             let tokens = Token::tokenize(expr.trim());
             let expr = Parser::new(&tokens).parse_expression(0);
 
-            stmts.push(Statement::Let(LetStmt::new(
-                String::from(ident),
-                signal_id,
+            stmts.push(Statement::Let {
+                ident: String::from(ident),
+                sigid: signal_id,
                 expr,
-            )));
+            });
             continue;
         }
 

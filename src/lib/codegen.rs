@@ -4,7 +4,7 @@ use crate::asm::*;
 use crate::mem::*;
 
 use crate::{
-    ast::{Expression, LetStmt, Program, Statement},
+    ast::{Expression, Program, Statement},
     error::CompileError,
     symbol::SymbolTable,
 };
@@ -30,8 +30,7 @@ impl Generator {
     pub fn generate(&mut self) -> Result<&str, CompileError> {
         for stmt in self.program.clone() {
             match stmt {
-                Statement::Let(let_stmt) => {
-                    let LetStmt { ident, sigid, expr } = let_stmt;
+                Statement::Let { ident, sigid, expr } => {
                     let reg = self.proc_expr(&expr, &sigid).unwrap();
                     self.symbols.insert(
                         ident.to_string(),

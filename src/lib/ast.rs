@@ -2,7 +2,11 @@ use crate::{error::CompileError, game::SignalId};
 
 #[derive(Debug, Clone)]
 pub enum Statement {
-    Let(LetStmt),
+    Let {
+        ident: String,
+        sigid: Option<SignalId>,
+        expr: Expression,
+    },
     Out(Signal),
 }
 
@@ -56,19 +60,6 @@ pub enum Sign {
     Mul,
     Div,
     Mod,
-}
-
-#[derive(Debug, Clone)]
-pub struct LetStmt {
-    pub ident: String,
-    pub sigid: Option<SignalId>,
-    pub expr: Expression,
-}
-
-impl LetStmt {
-    pub fn new(ident: String, sigid: Option<SignalId>, expr: Expression) -> Self {
-        Self { ident, sigid, expr }
-    }
 }
 
 #[derive(Debug, Default, Clone)]
