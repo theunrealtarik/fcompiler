@@ -1,4 +1,9 @@
-local data_raw = dofile("data_raw.lua")
+local _src = debug.getinfo(1, "S").source
+if _src:sub(1,1) == '@' then
+	_src = _src:sub(2)
+end
+local _dir = _src:match("(.*/)") or "./"
+local data_raw = dofile(_dir .. "data_raw.lua")
 
 local categories = {
 	["item"] = "Item",
@@ -43,7 +48,7 @@ end
 local lines = {}
 
 table.insert(lines, "use strum_macros::{EnumString, Display};")
-table.insert(lines, "use std::hash::{Hash, Hasher};")
+table.insert(lines, "use std::hash::Hasher;")
 table.insert(lines, "")
 
 for raw_cat, enum_name in pairs(categories) do
@@ -68,7 +73,7 @@ for raw_cat, enum_name in pairs(categories) do
 end
 
 local file_content = table.concat(lines, "\n")
-local output_path = "../../src/lib/game/signals.rs"
+local output_path = _dir .. "../../src/lib/game/signals.rs"
 local file = io.open(output_path, "w")
 
 if not file then
