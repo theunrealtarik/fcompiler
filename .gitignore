@@ -4,4 +4,4 @@
 .github
 
 scripts/signals/data_raw.lua
-lib/game/signals.rs
+src/lib/game/signals.rs
