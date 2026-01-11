@@ -4,8 +4,7 @@ use std::collections::HashSet;
 static MAX_REGISTERS: u8 = 63;
 
 #[allow(dead_code)]
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Register(u8);
 
 impl TryFrom<u8> for Register {
@@ -62,11 +61,11 @@ impl RegisterAllocator {
     }
 
     pub fn free(&mut self, r: Register) {
-        if r >= MAX_REGISTERS {
+        if *r >= MAX_REGISTERS {
             return;
         }
 
-        let mask = 1u64 << r;
+        let mask = 1u64 << *r;
         self.free |= mask;
     }
 }
