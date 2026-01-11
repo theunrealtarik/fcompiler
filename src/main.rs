@@ -8,6 +8,7 @@ fn main() {
     "#;
 
     let mut generator = Generator::new(parser::parse(source).unwrap());
+
     let code = generator.generate().unwrap();
     print!("\n{}", code);
 }

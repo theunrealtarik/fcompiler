@@ -52,7 +52,8 @@ impl Generator {
             }
         }
 
-        println!("{:#?}", self.registors);
+        dbg!(&self.symbols);
+        dbg!(&self.registors);
         Ok(self.asm.finish())
     }
 
@@ -80,7 +81,7 @@ impl Generator {
                 }
             },
             Expression::Op { lhs, rhs, op } => {
-                let lhs_reg = self.registors.alloc().unwrap();
+                let lhs_reg = reg;
                 let rhs_reg = self.registors.alloc().unwrap();
 
                 let lhs_stmt = LetStmt::new("tmp".to_string(), None, (lhs.deref()).clone());
@@ -97,15 +98,25 @@ impl Generator {
                     crate::ast::Sign::Mod => self.asm.modu(lhs_reg, rhs_reg),
                 }
 
-                self.symbols.insert(
-                    ident.to_string(),
-                    Variable::new(ident.to_string(), reg, None, None, *signal),
-                );
-
                 self.registors.free(rhs_reg);
                 self.asm.clr(Some(rhs_reg));
+
+                let lhs_entry = self
+                    .symbols
+                    .iter()
+                    .find(|(_, var)| var.reg == rhs_reg)
+                    .map(|(k, _)| k.clone());
+
+                if let Some(key) = lhs_entry {
+                    self.symbols.remove(&key);
+                }
             }
         }
+
+        self.symbols.insert(
+            ident.to_string(),
+            Variable::new(ident.to_string(), reg, None, None, *signal),
+        );
 
         Ok(())
     }
