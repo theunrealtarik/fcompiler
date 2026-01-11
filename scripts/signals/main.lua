@@ -1,5 +1,5 @@
 local _src = debug.getinfo(1, "S").source
-if _src:sub(1,1) == '@' then
+if _src:sub(1, 1) == "@" then
 	_src = _src:sub(2)
 end
 local _dir = _src:match("(.*/)") or "./"
@@ -48,7 +48,6 @@ end
 local lines = {}
 
 table.insert(lines, "use strum_macros::{EnumString, Display};")
-table.insert(lines, "use std::hash::Hasher;")
 table.insert(lines, "")
 
 for raw_cat, enum_name in pairs(categories) do
