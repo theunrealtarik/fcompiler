@@ -2,3 +2,5 @@
 .vscode
 .git
 .github
+
+scripts/signals/data_raw.lua
