@@ -43,18 +43,19 @@ impl Generator {
                         self.asm.out_item(self.outputs.out(), &scalar, &signal);
                     }
                     crate::ast::SignalValue::Var(ident) => {
-                        if let Some(var) = self.symbols.get(&ident) {
-                            match signal.id {
-                                Some(sigid) => {
-                                    let tmp = self.registors.alloc().unwrap();
-                                    self.asm.reg_item(tmp, &1, &Some(sigid.format()));
-                                    self.asm.mul(tmp, var.reg);
-                                    self.asm.clr(Some(tmp));
-                                }
-                                None => {
-                                    self.asm.out_reg(self.outputs.out(), var.reg);
-                                }
+                        if let Some(var) = self.symbols.get_mut(&ident) {
+                            if let Some(sigid) = signal.id {
+                                let caster = self.registors.alloc().unwrap();
+                                self.asm.reg_item(caster, &1, &Some(sigid.format()));
+                                self.asm.mul(caster, var.reg);
+
+                                self.registors.free(var.reg);
+                                self.asm.clr(Some(var.reg));
+
+                                var.reg = caster;
                             }
+
+                            self.asm.out_reg(self.outputs.out(), var.reg);
                         } else {
                             return Err(CompileError::UndefinedVariable(ident.clone()));
                         }

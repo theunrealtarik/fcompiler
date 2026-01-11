@@ -4,8 +4,7 @@ use lib::parser;
 fn main() {
     let source = r#"
     let y: CopperPlate = 2;
-    let x: IronPlate = 5 + 1 * y;
-    out(x);
+    out(y, PlasticBar);
     "#;
 
     let mut generator = Generator::new(parser::parse(source).unwrap());
