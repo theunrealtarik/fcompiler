@@ -34,7 +34,11 @@ impl Generator {
                         Location::REG(r) => r,
                         Location::IMM(n) => {
                             let r = self.registors.alloc().unwrap();
-                            self.asm.mov(r, n);
+                            match sigid {
+                                Some(s) => self.asm.reg_item(r, &n, &Some(s.format())),
+                                None => self.asm.mov(r, n),
+                            }
+
                             r
                         }
                         Location::STK(_) => todo!(),
