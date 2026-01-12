@@ -58,11 +58,19 @@ impl Generator {
                         if let Some(var) = self.symbols.get_mut(&ident) {
                             if let Some(sigid) = signal.id {
                                 let caster = self.registors.alloc().unwrap();
-                                self.asm.reg_item(caster, &1, &Some(sigid.format()));
-                                self.asm.mul::<_, String, _>(caster, None, var.loc);
+                                let reg = match var.loc {
+                                    Location::REG(r) => r,
+                                    Location::STK(_) => todo!(),
+                                    _ => {
+                                        return Err(CompileError::NonAddressableLocation);
+                                    }
+                                };
 
-                                // self.registors.free(var.reg);
-                                self.asm.clr(Some(var.loc));
+                                self.asm.reg_item(caster, &1, &Some(sigid.format()));
+                                self.asm.mul::<_, String, _>(caster, None, reg);
+
+                                self.registors.free(reg);
+                                self.asm.clr(Some(reg));
                                 var.loc = Location::REG(caster);
                             }
 

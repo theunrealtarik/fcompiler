@@ -20,4 +20,5 @@ pub enum CompileError {
     RegisterDoubleFree(u8),
     RegisterNotAllocated(u8),
     InvalidRegister,
+    NonAddressableLocation,
 }

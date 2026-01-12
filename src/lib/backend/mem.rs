@@ -79,6 +79,18 @@ impl RegisterAllocator {
         self.free |= mask;
     }
 
+    pub fn occupied(&self) -> Vec<Register> {
+        let mut occupied = Vec::new();
+
+        for b in 0..Self::MAX_REGISTERS {
+            if self.free & (1 << b) == 0 {
+                occupied.push(Register(b));
+            }
+        }
+
+        occupied
+    }
+
     pub fn is_used(&self, r: Register) -> bool {
         self.free & (1 << *r) == 0
     }

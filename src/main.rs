@@ -9,7 +9,7 @@ fn main() {
         let a: IronPlate = 10;
         let b = (a * 5) / (x - y);
 
-        out(a);
+        out(b, PlasticBar);
     "#;
 
     let mut generator = Generator::new(parser::parse(source).unwrap());
