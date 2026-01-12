@@ -1,13 +1,6 @@
-use crate::{
-    ast::{Signal, SignalValue},
-    error::CompileError,
-};
-use core::panic;
-
-use crate::{
-    ast::{Expression, Program, Statement},
-    game::SignalId,
-};
+use super::ast::*;
+use crate::error::CompileError;
+use crate::game::SignalId;
 
 pub fn parse(src: &str) -> Result<Program, CompileError> {
     let mut stmts: Vec<Statement> = Vec::new();
@@ -71,7 +64,7 @@ pub fn parse(src: &str) -> Result<Program, CompileError> {
             }
 
             let tokens = Token::tokenize(expr.trim());
-            let expr = Parser::new(&tokens).parse_expression(0);
+            let expr = Lexer::new(&tokens).parse_expression(0);
 
             stmts.push(Statement::Let {
                 ident: String::from(ident),
@@ -147,14 +140,14 @@ impl Token {
                 }
                 '0'..='9' => {
                     let mut num = 0;
-                    while let Some(&digit_ch) = chars.peek() {
-                        if let Some(d) = digit_ch.to_digit(10) {
-                            num = num * 10 + d as i32;
-                            chars.next();
-                        } else {
-                            break;
-                        }
+
+                    if let Some(d) = ch.to_digit(10) {
+                        num = num * 10 + d as i32;
+                        chars.next();
+                    } else {
+                        break;
                     }
+
                     tokens.push(Token::Number(num));
                 }
                 '+' => {
@@ -209,12 +202,12 @@ impl Token {
     }
 }
 
-pub struct Parser<'a> {
+pub struct Lexer<'a> {
     tokens: &'a [Token],
     pos: usize,
 }
 
-impl<'a> Parser<'a> {
+impl<'a> Lexer<'a> {
     pub fn new(tokens: &'a [Token]) -> Self {
         Self { tokens, pos: 0 }
     }
@@ -224,7 +217,6 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_expression(&mut self, min_prec: u8) -> Expression {
-        use crate::ast::Sign;
         let mut lhs = self.parse_leaf().unwrap();
 
         while let Some(op_token) = self.peek() {
@@ -277,7 +269,7 @@ impl<'a> Parser<'a> {
     }
 }
 
-impl<'a> std::iter::Iterator for Parser<'a> {
+impl<'a> std::iter::Iterator for Lexer<'a> {
     type Item = &'a Token;
 
     fn next(&mut self) -> Option<Self::Item> {

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-type VariableMap = HashMap<String, crate::mem::Variable>;
+type VariableMap = HashMap<String, super::mem::Variable>;
 
 #[derive(Debug)]
 pub struct SymbolTable(VariableMap);

@@ -53,12 +53,17 @@ pub enum Expression {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, strum_macros::Display)]
 pub enum Sign {
+    #[strum(to_string = "add")]
     Add,
+    #[strum(to_string = "sub")]
     Sub,
+    #[strum(to_string = "mul")]
     Mul,
+    #[strum(to_string = "div")]
     Div,
+    #[strum(to_string = "mod")]
     Mod,
 }
 

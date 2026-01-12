@@ -1,5 +1,12 @@
-// cpu registers (64 registers)
+// channeling
+pub enum MemoryChannel {
+    Chann1,
+    Chann2,
+    Chann3,
+    Chann4,
+}
 
+// cpu registers (64 registers)
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Register(u8);
@@ -90,9 +97,26 @@ impl RegisterAllocator {
 }
 
 // stack
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StackSlot(Register);
+
+impl std::ops::Deref for StackSlot {
+    type Target = u8;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for StackSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StackAllocator {
-    elements: Vec<u8>,
+    elements: Vec<StackSlot>,
 }
 
 impl StackAllocator {
@@ -102,15 +126,15 @@ impl StackAllocator {
         }
     }
 
-    pub fn push(&mut self, r: u8) {
+    pub fn push(&mut self, r: StackSlot) {
         self.elements.push(r)
     }
 
-    pub fn pop(&mut self) -> Option<u8> {
+    pub fn pop(&mut self) -> Option<StackSlot> {
         self.elements.pop()
     }
 
-    pub fn peek(&self) -> Option<&u8> {
+    pub fn peek(&self) -> Option<&StackSlot> {
         self.elements.last()
     }
 
@@ -133,36 +157,25 @@ impl Default for StackAllocator {
     }
 }
 
-// channeling
-pub enum MemoryChannel {
-    Chann1,
-    Chann2,
-    Chann3,
-    Chann4,
+// location
+#[derive(Debug, Clone, Copy, strum_macros::Display)]
+pub enum Location {
+    REG(Register),
+    STK(StackSlot),
+    IMM(i32),
 }
 
 // variable
 #[derive(Debug)]
 pub struct Variable {
     pub name: String,
-    pub reg: Register,
-    pub slot: Option<u8>,
+    pub loc: Location,
     pub signal: Option<crate::game::SignalId>,
 }
 
 impl Variable {
-    pub fn new(
-        name: String,
-        reg: Register,
-        slot: Option<u8>,
-        signal: Option<crate::game::SignalId>,
-    ) -> Self {
-        Self {
-            name,
-            reg,
-            slot,
-            signal,
-        }
+    pub fn new(name: String, loc: Location, signal: Option<crate::game::SignalId>) -> Self {
+        Self { name, loc, signal }
     }
 }
 
