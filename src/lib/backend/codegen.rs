@@ -74,7 +74,6 @@ impl Generator {
             }
         }
 
-        dbg!(&self.symbols);
         Ok(self.asm.finish())
     }
 
@@ -121,14 +120,10 @@ impl Generator {
             // X: R OP R
             (Location::REG(lhs), Location::REG(rhs)) => {
                 let dst = self.registors.alloc().unwrap();
+                self.omit_op(op, dst, Some(lhs), rhs);
 
-                match op {
-                    Sign::Add => self.asm.add(dst, Some(lhs), rhs),
-                    Sign::Sub => self.asm.sub(dst, Some(lhs), rhs),
-                    Sign::Mul => self.asm.mul(dst, Some(lhs), rhs),
-                    Sign::Div => self.asm.div(dst, Some(lhs), rhs),
-                    Sign::Mod => self.asm.modu(dst, Some(lhs), rhs),
-                }
+                self.free_unmapped(lhs);
+                self.free_unmapped(rhs);
 
                 Ok(Location::REG(dst))
             }
@@ -143,51 +138,55 @@ impl Generator {
                     Sign::Mod => n % m,
                 };
 
-                let reg = self.registors.alloc().unwrap();
-                self.asm.mov(reg, r);
-                Ok(Location::REG(reg))
+                // let reg = self.registors.alloc().unwrap();
+                // self.asm.mov(reg, r);
+                Ok(Location::IMM(r))
             }
 
+            // X: R OP N
             (Location::REG(lhs), Location::IMM(n)) => {
-                let lhs_is_symbol = self.symbols.values().any(|v| match v.loc {
-                    Location::REG(r) => r == lhs,
-                    _ => false,
-                });
-
-                dbg!(&lhs_is_symbol);
-
                 let dst = self.registors.alloc().unwrap();
-                self.asm.mov(dst, lhs);
-                match op {
-                    Sign::Add => self.asm.addi(dst, n),
-                    Sign::Sub => self.asm.subi(dst, n),
-                    Sign::Mul => self.asm.mul(dst, None::<Register>, n),
-                    Sign::Div => self.asm.div(dst, None::<Register>, n),
-                    Sign::Mod => self.asm.modu(dst, None::<Register>, n),
-                }
-
-                if !lhs_is_symbol {
-                    return Ok(Location::REG(lhs));
-                }
-
+                self.omit_op(op, dst, Some(lhs), n);
+                self.free_unmapped(lhs);
                 Ok(Location::REG(dst))
             }
 
-            // N OP R -> make immediate into reg then three-operand
+            // X: N OP R
             (Location::IMM(n), Location::REG(rhs)) => {
-                let lhs = self.registors.alloc().unwrap();
-                self.asm.reg_item(lhs, &n, &None);
-                let dst = self.registors.alloc().unwrap();
-                match op {
-                    Sign::Add => self.asm.add(dst, Some(lhs), rhs),
-                    Sign::Sub => self.asm.sub(dst, Some(lhs), rhs),
-                    Sign::Mul => self.asm.mul(dst, Some(lhs), rhs),
-                    Sign::Div => self.asm.div(dst, Some(lhs), rhs),
-                    Sign::Mod => self.asm.modu(dst, Some(lhs), rhs),
+                if op.is_commutative() {
+                    return self.lower_op(Location::REG(rhs), Location::IMM(n), op);
                 }
+
+                let dst = self.registors.alloc().unwrap();
+                self.omit_op(op, dst, Some(rhs), n);
+                self.free_unmapped(rhs);
+
                 Ok(Location::REG(dst))
             }
             _ => unimplemented!("CASE NOT IMPLEMENTED"),
+        }
+    }
+
+    fn omit_op<D, S, V>(&mut self, op: &Sign, dst: D, src: Option<S>, val: V)
+    where
+        D: std::fmt::Display,
+        S: std::fmt::Display,
+        V: std::fmt::Display,
+    {
+        match op {
+            Sign::Add => self.asm.add(dst, src, val),
+            Sign::Sub => self.asm.sub(dst, src, val),
+            Sign::Mul => self.asm.mul(dst, src, val),
+            Sign::Div => self.asm.div(dst, src, val),
+            Sign::Mod => self.asm.modu(dst, src, val),
+        }
+    }
+
+    fn free_unmapped(&mut self, r: Register) {
+        let sym = self.symbols.get_by_register(&r);
+
+        if sym.is_none() {
+            self.registors.free(r);
         }
     }
 }

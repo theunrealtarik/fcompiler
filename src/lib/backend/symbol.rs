@@ -23,6 +23,18 @@ impl SymbolTable {
     pub fn new() -> Self {
         Self(HashMap::new())
     }
+
+    pub fn get_by_register(
+        &self,
+        reg: &crate::backend::mem::Register,
+    ) -> Option<&crate::backend::mem::Variable> {
+        self.iter()
+            .find(|(_, var)| match var.loc {
+                crate::backend::mem::Location::REG(r) => r == *reg,
+                _ => false,
+            })
+            .map(|(_, v)| v)
+    }
 }
 
 impl Default for SymbolTable {

@@ -67,6 +67,15 @@ pub enum Sign {
     Mod,
 }
 
+impl Sign {
+    pub fn is_commutative(&self) -> bool {
+        match self {
+            Self::Add | Self::Mul => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Signal {
     pub value: SignalValue,
