@@ -3,8 +3,10 @@ use lib::frontend::parser;
 
 fn main() {
     let source = r#"
-    let test = 5 * 2 / (1 + 3) * 4;
-    out(test);
+    let n = 2;
+    let m = 3;
+    let r = n * m + 1;
+    out(r);
     "#;
 
     let mut generator = Generator::new(parser::parse(source).unwrap());

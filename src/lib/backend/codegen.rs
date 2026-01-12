@@ -30,10 +30,19 @@ impl Generator {
         for stmt in self.program.clone() {
             match stmt {
                 Statement::Let { ident, sigid, expr } => {
-                    let reg = self.proc_expr(&expr, &sigid).unwrap();
+                    let reg = match self.proc_expr(&expr, &sigid).unwrap() {
+                        Location::REG(r) => r,
+                        Location::IMM(n) => {
+                            let r = self.registors.alloc().unwrap();
+                            self.asm.mov(r, n);
+                            r
+                        }
+                        Location::STK(_) => todo!(),
+                    };
+
                     self.symbols.insert(
                         ident.to_string(),
-                        Variable::new(ident.to_string(), reg, sigid),
+                        Variable::new(ident.to_string(), Location::REG(reg), sigid),
                     );
                 }
                 Statement::Out(signal) => match signal.value {
@@ -55,8 +64,7 @@ impl Generator {
 
                             match var.loc {
                                 Location::REG(r) => self.asm.out_reg(self.outputs.out(), r),
-                                Location::STK(_) => todo!(),
-                                Location::IMM(_) => todo!(),
+                                _ => continue,
                             }
                         } else {
                             return Err(CompileError::UndefinedVariable(ident.clone()));
@@ -66,6 +74,7 @@ impl Generator {
             }
         }
 
+        dbg!(&self.symbols);
         Ok(self.asm.finish())
     }
 
@@ -75,27 +84,21 @@ impl Generator {
         parent_sigid: &Option<crate::game::SignalId>,
     ) -> Result<Location, CompileError> {
         match expr {
-            Expression::Value(signal) => {
-                let reg = self.registors.alloc().unwrap();
-                match &signal.value {
-                    SignalValue::Num(n) => {
-                        self.asm.reg_item(reg, n, &parent_sigid.map(|s| s.format()));
-                    }
-                    SignalValue::Var(r_ident) => {
-                        let var = self
-                            .symbols
-                            .get(r_ident)
-                            .ok_or_else(|| CompileError::UndefinedVariable(r_ident.clone()))
-                            .unwrap();
+            Expression::Value(signal) => match &signal.value {
+                SignalValue::Num(n) => Ok(Location::IMM(*n)),
+                SignalValue::Var(r_ident) => {
+                    let var = self
+                        .symbols
+                        .get(r_ident)
+                        .ok_or_else(|| CompileError::UndefinedVariable(r_ident.clone()))
+                        .unwrap();
 
-                        let dst = reg;
-                        let src = var.loc;
-                        self.asm.mov(dst, src);
+                    match var.loc {
+                        Location::REG(r) => Ok(Location::REG(r)),
+                        _ => todo!(),
                     }
                 }
-
-                Ok(Location::REG(reg))
-            }
+            },
             Expression::Op { lhs, rhs, op } => {
                 let lhs = (lhs.deref()).clone();
                 let rhs = (rhs.deref()).clone();
@@ -115,15 +118,73 @@ impl Generator {
         op: &Sign,
     ) -> Result<Location, CompileError> {
         match (lhs, rhs) {
-            (Location::REG(dst), Location::REG(src)) => {
+            // X: R OP R
+            (Location::REG(lhs), Location::REG(rhs)) => {
+                let dst = self.registors.alloc().unwrap();
+
                 match op {
-                    Sign::Add => self.asm.add_r(dst, src),
-                    Sign::Sub => self.asm.sub_r(dst, src),
-                    Sign::Mul => self.asm.mul_r(dst, src),
-                    Sign::Div => self.asm.div_r(dst, src),
-                    Sign::Mod => self.asm.modu_r(dst, src),
+                    Sign::Add => self.asm.add(dst, Some(lhs), rhs),
+                    Sign::Sub => self.asm.sub(dst, Some(lhs), rhs),
+                    Sign::Mul => self.asm.mul(dst, Some(lhs), rhs),
+                    Sign::Div => self.asm.div(dst, Some(lhs), rhs),
+                    Sign::Mod => self.asm.modu(dst, Some(lhs), rhs),
                 }
-                self.registors.free(src);
+
+                Ok(Location::REG(dst))
+            }
+
+            // X: N OP M
+            (Location::IMM(n), Location::IMM(m)) => {
+                let r = match op {
+                    Sign::Add => n + m,
+                    Sign::Sub => n - m,
+                    Sign::Mul => n * m,
+                    Sign::Div => n / m,
+                    Sign::Mod => n % m,
+                };
+
+                let reg = self.registors.alloc().unwrap();
+                self.asm.mov(reg, r);
+                Ok(Location::REG(reg))
+            }
+
+            (Location::REG(lhs), Location::IMM(n)) => {
+                let lhs_is_symbol = self.symbols.values().any(|v| match v.loc {
+                    Location::REG(r) => r == lhs,
+                    _ => false,
+                });
+
+                dbg!(&lhs_is_symbol);
+
+                let dst = self.registors.alloc().unwrap();
+                self.asm.mov(dst, lhs);
+                match op {
+                    Sign::Add => self.asm.addi(dst, n),
+                    Sign::Sub => self.asm.subi(dst, n),
+                    Sign::Mul => self.asm.mul(dst, None::<Register>, n),
+                    Sign::Div => self.asm.div(dst, None::<Register>, n),
+                    Sign::Mod => self.asm.modu(dst, None::<Register>, n),
+                }
+
+                if !lhs_is_symbol {
+                    return Ok(Location::REG(lhs));
+                }
+
+                Ok(Location::REG(dst))
+            }
+
+            // N OP R -> make immediate into reg then three-operand
+            (Location::IMM(n), Location::REG(rhs)) => {
+                let lhs = self.registors.alloc().unwrap();
+                self.asm.reg_item(lhs, &n, &None);
+                let dst = self.registors.alloc().unwrap();
+                match op {
+                    Sign::Add => self.asm.add(dst, Some(lhs), rhs),
+                    Sign::Sub => self.asm.sub(dst, Some(lhs), rhs),
+                    Sign::Mul => self.asm.mul(dst, Some(lhs), rhs),
+                    Sign::Div => self.asm.div(dst, Some(lhs), rhs),
+                    Sign::Mod => self.asm.modu(dst, Some(lhs), rhs),
+                }
                 Ok(Location::REG(dst))
             }
             _ => unimplemented!("CASE NOT IMPLEMENTED"),

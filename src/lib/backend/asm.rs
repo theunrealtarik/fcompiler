@@ -20,8 +20,8 @@ impl Asm {
 
     pub fn mov<D, S>(&mut self, dst: D, src: S)
     where
-        S: std::fmt::Display,
-        D: std::fmt::Display,
+        S: std::fmt::Display + std::fmt::Debug,
+        D: std::fmt::Display + std::fmt::Debug,
     {
         #[allow(clippy::to_string_in_format_args)]
         self.code.push_str(&format!("mov {} {}\n", dst, src));
@@ -110,6 +110,14 @@ impl Asm {
         V: std::fmt::Display,
     {
         self.arith_op(&"sub", dst, src, val);
+    }
+
+    pub fn subi<D, V>(&mut self, dst: D, val: V)
+    where
+        D: std::fmt::Display,
+        V: std::fmt::Display,
+    {
+        self.sub::<D, String, V>(dst, None, val);
     }
 
     pub fn sub_r<D, S>(&mut self, dst: D, src: S)
