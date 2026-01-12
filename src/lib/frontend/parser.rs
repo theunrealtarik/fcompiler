@@ -141,11 +141,13 @@ impl Token {
                 '0'..='9' => {
                     let mut num = 0;
 
-                    if let Some(d) = ch.to_digit(10) {
-                        num = num * 10 + d as i32;
-                        chars.next();
-                    } else {
-                        break;
+                    while let Some(ch_digit) = chars.peek() {
+                        if let Some(d) = ch_digit.to_digit(10) {
+                            num = num * 10 + d as i32;
+                            chars.next();
+                        } else {
+                            break;
+                        }
                     }
 
                     tokens.push(Token::Number(num));
