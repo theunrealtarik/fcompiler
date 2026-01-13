@@ -1,20 +1,43 @@
-use crate::{error::CompileError, game::SignalId};
+use crate::error::*;
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Span {
+    pub line: usize,
+}
+
+impl Span {
+    pub fn new(line: usize) -> Self {
+        Self { line }
+    }
+}
 
 #[derive(Debug, Clone)]
-pub enum Statement {
+pub enum StatementKind {
     Let {
         ident: String,
-        sigid: Option<SignalId>,
+        sigid: Option<crate::game::SignalId>,
         expr: Expression,
     },
     Out(Signal),
 }
 
+#[derive(Debug, Clone)]
+pub struct StatementContext {
+    pub kind: StatementKind,
+    pub span: Span,
+}
+
+impl StatementContext {
+    pub fn new(kind: StatementKind, span: Span) -> Self {
+        Self { kind, span }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
-pub struct Program(Vec<Statement>);
+pub struct Program(Vec<StatementContext>);
 
 impl std::ops::Deref for Program {
-    type Target = Vec<Statement>;
+    type Target = Vec<StatementContext>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -22,14 +45,14 @@ impl std::ops::Deref for Program {
 }
 
 impl<'a> Iterator for &'a Program {
-    type Item = &'a Statement;
+    type Item = &'a StatementContext;
     fn next(&mut self) -> Option<Self::Item> {
         self.0.iter().next()
     }
 }
 
 impl IntoIterator for Program {
-    type Item = Statement;
+    type Item = StatementContext;
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -37,8 +60,8 @@ impl IntoIterator for Program {
     }
 }
 
-impl From<Vec<Statement>> for Program {
-    fn from(value: Vec<Statement>) -> Self {
+impl From<Vec<StatementContext>> for Program {
+    fn from(value: Vec<StatementContext>) -> Self {
         Self(value)
     }
 }
@@ -79,11 +102,11 @@ impl Sign {
 #[derive(Debug, Default, Clone)]
 pub struct Signal {
     pub value: SignalValue,
-    pub id: Option<SignalId>,
+    pub id: Option<crate::game::SignalId>,
 }
 
 impl Signal {
-    pub fn new(value: SignalValue, id: Option<SignalId>) -> Self {
+    pub fn new(value: SignalValue, id: Option<crate::game::SignalId>) -> Self {
         Self { value, id }
     }
 }
@@ -94,7 +117,10 @@ impl TryInto<i32> for Signal {
     fn try_into(self) -> Result<i32, Self::Error> {
         match self.value {
             SignalValue::Num(n) => Ok(n),
-            SignalValue::Var(ident) => Err(CompileError::ExpectedConstantSignal { found: ident }),
+            SignalValue::Var(_) => Err(CompileError::new(
+                CompileErrorKind::Parse(ParseError::UnexpectedVariant),
+                None,
+            )),
         }
     }
 }

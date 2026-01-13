@@ -3,16 +3,20 @@ use lib::frontend::parser;
 
 fn main() {
     let source = r#"
-        let x = 5;
-        let y = x * 2;
-
-        let a: IronPlate = 10;
-        let b = (a * 5) / (x - y);
-
-        out(b, PlasticBar);
+    let z = -(2 + 2);
+    let z = -2 + 2;
     "#;
 
-    let mut generator = Generator::new(parser::parse(source).unwrap());
-    let code = generator.generate().unwrap();
-    print!("\n{}", code);
+    let mut generator = Generator::new(parser::parse(source).unwrap_or_else(|err| {
+        eprintln!("{}", err);
+        std::process::exit(1);
+    }));
+
+    match generator.generate() {
+        Ok(code) => println!("{}", code),
+        Err(err) => {
+            eprintln!("{}", err);
+            std::process::exit(1);
+        }
+    }
 }

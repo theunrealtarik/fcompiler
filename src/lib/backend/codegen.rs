@@ -4,7 +4,7 @@ use super::asm::*;
 use super::mem::*;
 use super::symbol::*;
 
-use crate::error::CompileError;
+use crate::error::*;
 use crate::frontend::ast::*;
 
 #[derive(Debug, Default)]
@@ -28,28 +28,31 @@ impl Generator {
 
     pub fn generate(&mut self) -> Result<&str, CompileError> {
         for stmt in self.program.clone() {
-            match stmt {
-                Statement::Let { ident, sigid, expr } => {
-                    let reg = match self.proc_expr(&expr, &sigid).unwrap() {
-                        Location::REG(r) => r,
-                        Location::IMM(n) => {
-                            let r = self.registors.alloc().unwrap();
-                            match sigid {
-                                Some(s) => self.asm.reg_item(r, &n, &Some(s.format())),
-                                None => self.asm.mov(r, n),
+            match stmt.kind {
+                StatementKind::Let { ident, sigid, expr } => match self.proc_expr(&expr) {
+                    Ok(loc) => {
+                        let reg = match loc {
+                            Location::REG(r) => r,
+                            Location::STK(_s) => todo!(),
+                            Location::IMM(n) => {
+                                let r = self.registors.alloc().unwrap();
+                                match sigid {
+                                    Some(s) => self.asm.reg_item(r, &n, &Some(s.format())),
+                                    None => self.asm.mov(r, n),
+                                }
+
+                                r
                             }
+                        };
 
-                            r
-                        }
-                        Location::STK(_) => todo!(),
-                    };
-
-                    self.symbols.insert(
-                        ident.to_string(),
-                        Variable::new(ident.to_string(), Location::REG(reg), sigid),
-                    );
-                }
-                Statement::Out(signal) => match signal.value {
+                        self.symbols.insert(
+                            ident.to_string(),
+                            Variable::new(ident.to_string(), Location::REG(reg), sigid),
+                        );
+                    }
+                    Err(kind) => return Err(CompileError::new(kind, Some(stmt.span))),
+                },
+                StatementKind::Out(signal) => match signal.value {
                     SignalValue::Num(scalar) => {
                         let signal = signal.id.map(|s| s.format());
                         self.asm.out_item(self.outputs.out(), &scalar, &signal);
@@ -62,7 +65,12 @@ impl Generator {
                                     Location::REG(r) => r,
                                     Location::STK(_) => todo!(),
                                     _ => {
-                                        return Err(CompileError::NonAddressableLocation);
+                                        return Err(CompileError::new(
+                                            CompileErrorKind::Generation(
+                                                GeneratorError::NonAddressableLocation,
+                                            ),
+                                            Some(stmt.span),
+                                        ));
                                     }
                                 };
 
@@ -79,7 +87,12 @@ impl Generator {
                                 _ => continue,
                             }
                         } else {
-                            return Err(CompileError::UndefinedVariable(ident.clone()));
+                            return Err(CompileError::new(
+                                CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
+                                    ident.clone(),
+                                )),
+                                Some(stmt.span),
+                            ));
                         }
                     }
                 },
@@ -89,11 +102,7 @@ impl Generator {
         Ok(self.asm.finish())
     }
 
-    fn proc_expr(
-        &mut self,
-        expr: &Expression,
-        parent_sigid: &Option<crate::game::SignalId>,
-    ) -> Result<Location, CompileError> {
+    fn proc_expr(&mut self, expr: &Expression) -> Result<Location, CompileErrorKind> {
         match expr {
             Expression::Value(signal) => match &signal.value {
                 SignalValue::Num(n) => Ok(Location::IMM(*n)),
@@ -101,7 +110,11 @@ impl Generator {
                     let var = self
                         .symbols
                         .get(r_ident)
-                        .ok_or_else(|| CompileError::UndefinedVariable(r_ident.clone()))
+                        .ok_or_else(|| {
+                            CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
+                                r_ident.clone(),
+                            ))
+                        })
                         .unwrap();
 
                     match var.loc {
@@ -114,8 +127,8 @@ impl Generator {
                 let lhs = (lhs.deref()).clone();
                 let rhs = (rhs.deref()).clone();
 
-                let lhs_loc = self.proc_expr(&lhs, parent_sigid).unwrap();
-                let rhs_loc = self.proc_expr(&rhs, parent_sigid).unwrap();
+                let lhs_loc = self.proc_expr(&lhs).unwrap();
+                let rhs_loc = self.proc_expr(&rhs).unwrap();
 
                 self.lower_op(lhs_loc, rhs_loc, op)
             }
@@ -127,7 +140,7 @@ impl Generator {
         lhs: Location,
         rhs: Location,
         op: &Sign,
-    ) -> Result<Location, CompileError> {
+    ) -> Result<Location, CompileErrorKind> {
         match (lhs, rhs) {
             // X: R OP R
             (Location::REG(lhs), Location::REG(rhs)) => {

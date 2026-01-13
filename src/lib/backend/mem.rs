@@ -16,7 +16,12 @@ impl TryFrom<u8> for Register {
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         if value > RegisterAllocator::MAX_REGISTERS {
-            return Err(crate::error::CompileError::InvalidRegister);
+            return Err(crate::error::CompileError::new(
+                crate::error::CompileErrorKind::Generation(
+                    crate::error::GeneratorError::InvalidRegister,
+                ),
+                None,
+            ));
         }
 
         Ok(Self(value))
@@ -57,7 +62,12 @@ impl RegisterAllocator {
 
     pub fn alloc(&mut self) -> Result<Register, crate::error::CompileError> {
         if self.free == 0 {
-            return Err(crate::error::CompileError::OutOfRegisters);
+            return Err(crate::error::CompileError::new(
+                crate::error::CompileErrorKind::Generation(
+                    crate::error::GeneratorError::OutOfRegisters,
+                ),
+                None,
+            ));
         }
 
         let idx = self.free.trailing_zeros();
