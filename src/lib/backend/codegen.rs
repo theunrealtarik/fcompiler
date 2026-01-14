@@ -120,10 +120,24 @@ impl Generator {
                 let lhs = (lhs.deref()).clone();
                 let rhs = (rhs.deref()).clone();
 
-                let lhs_loc = self.proc_expr(&lhs).unwrap();
-                let rhs_loc = self.proc_expr(&rhs).unwrap();
+                let lhs_loc = self.proc_expr(&lhs)?;
+                let rhs_loc = self.proc_expr(&rhs)?;
 
                 self.lower_op(lhs_loc, rhs_loc, op)
+            }
+            Expression::UnaryOp { expr, op } => {
+                let loc = self.proc_expr(&expr)?;
+
+                let dst = self.registors.alloc().unwrap();
+                let reg = self.ensure_reg(loc);
+
+                match op {
+                    UnarySign::Neg => self.asm.mul(dst, Some(reg), -1),
+                    UnarySign::Not => {}
+                }
+
+                self.registors.free(reg);
+                Ok(loc)
             }
         }
     }

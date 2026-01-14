@@ -4,9 +4,7 @@ use lib::frontend::parser;
 fn main() {
     let source = r#"
         let x = 2;
-        let y = 3;
-
-        let z = -x + y;
+        let y = -x;
     "#;
 
     let mut generator = Generator::new(parser::parse(source).unwrap_or_else(|err| {

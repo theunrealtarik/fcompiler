@@ -317,10 +317,9 @@ impl<'a> Lexer<'a> {
             }
             Some(Token::Minus) => {
                 match self.parse_expression(Token::Minus.precedence().unwrap() + 1) {
-                    Ok(expr) => Ok(Expression::Op {
-                        lhs: Box::new(Expression::Value(Signal::from(-1))),
-                        rhs: Box::new(expr),
-                        op: Sign::Mul,
+                    Ok(expr) => Ok(Expression::UnaryOp {
+                        expr: Box::new(expr),
+                        op: UnarySign::Neg,
                     }),
                     Err(k) => Err(k),
                 }

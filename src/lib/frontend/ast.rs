@@ -78,6 +78,10 @@ pub enum Expression {
         rhs: Box<Expression>,
         op: Sign,
     },
+    UnaryOp {
+        expr: Box<Expression>,
+        op: UnarySign,
+    },
 }
 
 #[derive(Debug, Clone, Copy, strum_macros::Display)]
@@ -98,6 +102,12 @@ impl Sign {
     pub fn is_commutative(&self) -> bool {
         matches!(self, Self::Add | Self::Mul)
     }
+}
+
+#[derive(Debug, Clone, Copy, strum_macros::Display)]
+pub enum UnarySign {
+    Neg,
+    Not,
 }
 
 #[derive(Debug, Default, Clone)]
