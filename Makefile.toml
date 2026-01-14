@@ -25,5 +25,10 @@ args = ["./scripts/signals/dl_dump.sh"]
 command = "lua"
 args = ["./scripts/signals/main.lua"]
 
+[tasks.debug]
+env = { "RUST_LOG" = "debug" }
+command = "cargo"
+args = ["run"]
+
 [tasks.flow]
 dependencies = ["format", "generate", "build", "test"]

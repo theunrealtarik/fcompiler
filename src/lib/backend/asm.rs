@@ -1,4 +1,5 @@
 use super::mem::*;
+use log::debug;
 
 #[derive(Debug)]
 pub struct Asm {
@@ -23,14 +24,17 @@ impl Asm {
         S: std::fmt::Display + std::fmt::Debug,
         D: std::fmt::Display + std::fmt::Debug,
     {
+        debug!("mov {:?} <- {:?}", dst, src);
         #[allow(clippy::to_string_in_format_args)]
         self.code.push_str(&format!("mov {} {}\n", dst, src));
     }
 
     pub fn clr<T>(&mut self, dst: Option<T>)
     where
-        T: std::fmt::Display,
+        T: std::fmt::Display + std::fmt::Debug,
     {
+        debug!("clr {:?}", dst.as_ref().map(|d| format!("{}", d)));
+
         let dst = match dst {
             Some(d) => format!(" {}\n", d),
             None => String::default(),
@@ -41,28 +45,31 @@ impl Asm {
 
     // Move item to a CPU register
     pub fn reg_item(&mut self, reg: Register, val: &i32, sig: &Option<String>) {
+        debug!("load immediate {}{:?} into {:?}", val, sig, reg);
         let item = format!("{}{}", val, sig.as_ref().unwrap_or(&String::new()));
         self.mov(reg, item);
     }
 
     // Move item to an outputting operand
     pub fn out_item(&mut self, out: Out, val: &i32, sig: &Option<String>) {
+        debug!("write immediate {}{:?} to {:?}", val, sig, out);
         let item = format!("{}{}", val, sig.as_ref().unwrap_or(&String::new()));
         self.mov(out, item);
     }
 
     // Move register to an outputting operand
     pub fn out_reg(&mut self, out: Out, reg: Register) {
+        debug!("write register {:?} to {:?}", reg, out);
         self.mov(out, reg);
     }
 
-    // Arithematics
+    // Arithmetic helper
     fn arith_op<O, D, S, V>(&mut self, op: &O, dst: D, src: Option<S>, val: V)
     where
-        O: std::fmt::Display,
-        D: std::fmt::Display,
-        S: std::fmt::Display,
-        V: std::fmt::Display,
+        O: std::fmt::Display + std::fmt::Debug,
+        D: std::fmt::Display + std::fmt::Debug,
+        S: std::fmt::Display + std::fmt::Debug,
+        V: std::fmt::Display + std::fmt::Debug,
     {
         let rhs = match src {
             Some(s) => format!("{} {}", s, val),
@@ -74,115 +81,86 @@ impl Asm {
     }
 
     // ADD
-    /// add dst src? val
     pub fn add<D, S, V>(&mut self, dst: D, src: Option<S>, val: V)
     where
-        D: std::fmt::Display,
-        S: std::fmt::Display,
-        V: std::fmt::Display,
+        D: std::fmt::Display + std::fmt::Debug,
+        S: std::fmt::Display + std::fmt::Debug,
+        V: std::fmt::Display + std::fmt::Debug,
     {
+        match &src {
+            Some(s) => debug!("{:?} = {:?} + {:?}", dst, s, val),
+            None => debug!("{:?} = {:?} + {:?}", dst, dst, val),
+        }
         self.arith_op(&"add", dst, src, val);
     }
 
-    /// dst = dst + val
-    pub fn addi<D, V>(&mut self, dst: D, val: V)
-    where
-        D: std::fmt::Display,
-        V: std::fmt::Display,
-    {
-        self.add::<D, String, V>(dst, None, val);
-    }
-
-    /// dst = dst + src
-    pub fn add_r<D, S>(&mut self, dst: D, src: S)
-    where
-        D: std::fmt::Display,
-        S: std::fmt::Display,
-    {
-        self.add(dst, Some(src), "");
-    }
-
-    // SUBTRACT
+    // SUB
     pub fn sub<D, S, V>(&mut self, dst: D, src: Option<S>, val: V)
     where
-        D: std::fmt::Display,
-        S: std::fmt::Display,
-        V: std::fmt::Display,
+        D: std::fmt::Display + std::fmt::Debug,
+        S: std::fmt::Display + std::fmt::Debug,
+        V: std::fmt::Display + std::fmt::Debug,
     {
+        match &src {
+            Some(s) => debug!("{:?} = {:?} - {:?}", dst, s, val),
+            None => debug!("{:?} = {:?} - {:?}", dst, dst, val),
+        }
         self.arith_op(&"sub", dst, src, val);
     }
 
-    pub fn subi<D, V>(&mut self, dst: D, val: V)
-    where
-        D: std::fmt::Display,
-        V: std::fmt::Display,
-    {
-        self.sub::<D, String, V>(dst, None, val);
-    }
-
-    pub fn sub_r<D, S>(&mut self, dst: D, src: S)
-    where
-        D: std::fmt::Display,
-        S: std::fmt::Display,
-    {
-        self.sub(dst, Some(src), "");
-    }
-
-    // MULTIPLY
+    // MUL
     pub fn mul<D, S, V>(&mut self, dst: D, src: Option<S>, val: V)
     where
-        D: std::fmt::Display,
-        S: std::fmt::Display,
-        V: std::fmt::Display,
+        D: std::fmt::Display + std::fmt::Debug,
+        S: std::fmt::Display + std::fmt::Debug,
+        V: std::fmt::Display + std::fmt::Debug,
     {
+        match &src {
+            Some(s) => debug!("{:?} = {:?} × {:?}", dst, s, val),
+            None => debug!("{:?} = {:?} × {:?}", dst, dst, val),
+        }
         self.arith_op(&"mul", dst, src, val);
     }
 
-    pub fn mul_r<D, S>(&mut self, dst: D, src: S)
-    where
-        D: std::fmt::Display,
-        S: std::fmt::Display,
-    {
-        self.mul(dst, Some(src), "");
-    }
-
-    // DIVIDE
+    // DIV
     pub fn div<D, S, V>(&mut self, dst: D, src: Option<S>, val: V)
     where
-        D: std::fmt::Display,
-        S: std::fmt::Display,
-        V: std::fmt::Display,
+        D: std::fmt::Display + std::fmt::Debug,
+        S: std::fmt::Display + std::fmt::Debug,
+        V: std::fmt::Display + std::fmt::Debug,
     {
+        match &src {
+            Some(s) => debug!("{:?} = {:?} ÷ {:?}", dst, s, val),
+            None => debug!("{:?} = {:?} ÷ {:?}", dst, dst, val),
+        }
         self.arith_op(&"div", dst, src, val);
     }
 
-    pub fn div_r<D, S>(&mut self, dst: D, src: S)
-    where
-        D: std::fmt::Display,
-        S: std::fmt::Display,
-    {
-        self.div(dst, Some(src), "");
-    }
-
-    // MODULO (remainder)
+    // MOD
     pub fn modu<D, S, V>(&mut self, dst: D, src: Option<S>, val: V)
     where
-        D: std::fmt::Display,
-        S: std::fmt::Display,
-        V: std::fmt::Display,
+        D: std::fmt::Display + std::fmt::Debug,
+        S: std::fmt::Display + std::fmt::Debug,
+        V: std::fmt::Display + std::fmt::Debug,
     {
+        match &src {
+            Some(s) => debug!("{:?} = {:?} % {:?}", dst, s, val),
+            None => debug!("{:?} = {:?} % {:?}", dst, dst, val),
+        }
         self.arith_op(&"mod", dst, src, val);
     }
+    pub fn inc<D: std::fmt::Display + std::fmt::Debug>(&mut self, dst: D) {
+        debug!("{:?} += 1", dst);
+        self.code.push_str(&format!("inc {}\n", dst));
+    }
 
-    pub fn modu_r<D, S>(&mut self, dst: D, src: S)
-    where
-        D: std::fmt::Display,
-        S: std::fmt::Display,
-    {
-        self.modu(dst, Some(src), "");
+    pub fn dec<D: std::fmt::Display + std::fmt::Debug>(&mut self, dst: D) {
+        debug!("{:?} -= 1", dst);
+        self.code.push_str(&format!("inc {}\n", dst));
     }
 
     pub fn finish(&self) -> &str {
+        debug!("ASM finalized ({} bytes)", self.code.len());
         &self.code
     }
 }

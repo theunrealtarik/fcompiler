@@ -5,6 +5,10 @@ pub mod error;
 pub mod game;
 
 pub mod utils {
+    pub fn env() {
+        env_logger::builder().format_timestamp(None).init();
+    }
+
     #[macro_export]
     macro_rules! chstring {
         ( $( $c:expr ),* $(,)? ) => {{

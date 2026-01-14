@@ -1,3 +1,5 @@
+use log::debug;
+
 // channeling
 pub enum MemoryChannel {
     Chann1,
@@ -77,6 +79,7 @@ impl RegisterAllocator {
     }
 
     pub fn free(&mut self, r: Register) {
+        debug!("free {:?}", r);
         if *r >= Self::MAX_REGISTERS {
             return;
         }

@@ -56,8 +56,8 @@ impl Generator {
                         Err(kind) => return Err(CompileError::new(kind, Some(stmt.span))),
                     };
 
-                    let reg = self.ensure_reg(loc);
-                    self.asm.mov(prev_reg, reg);
+                    // let reg = self.ensure_reg(loc);
+                    // self.asm.mov(prev_reg, reg);
                     self.registors.free(prev_reg);
                 }
                 StatementKind::Out(signal) => match signal.value {
@@ -139,7 +139,7 @@ impl Generator {
                     UnarySign::Not => todo!(),
                 }
 
-                self.registors.free(dst);
+                // self.registors.free(dst);
                 Ok(OperandLocation::REG(dst))
             }
         }
@@ -181,8 +181,20 @@ impl Generator {
             // X: R OP N
             (OperandLocation::REG(lhs), OperandLocation::IMM(n)) => {
                 let dst = self.registors.alloc().unwrap();
-                self.omit_op(op, dst, Some(lhs), n);
-                self.free_unmapped(lhs);
+
+                if dst == lhs && n == 1 {
+                    match op {
+                        Sign::Add => self.asm.inc(dst),
+                        Sign::Sub => self.asm.dec(dst),
+                        Sign::Mul => self.asm.mul(dst, Some(lhs), n),
+                        Sign::Div => self.asm.div(dst, Some(lhs), n),
+                        Sign::Mod => self.asm.modu(dst, Some(lhs), n),
+                    }
+                } else {
+                    self.omit_op(op, dst, Some(lhs), n);
+                    self.free_unmapped(lhs);
+                }
+
                 Ok(OperandLocation::REG(dst))
             }
 
@@ -204,9 +216,9 @@ impl Generator {
 
     fn omit_op<D, S, V>(&mut self, op: &Sign, dst: D, src: Option<S>, val: V)
     where
-        D: std::fmt::Display,
-        S: std::fmt::Display,
-        V: std::fmt::Display,
+        D: std::fmt::Display + std::fmt::Debug,
+        S: std::fmt::Display + std::fmt::Debug,
+        V: std::fmt::Display + std::fmt::Debug,
     {
         match op {
             Sign::Add => self.asm.add(dst, src, val),
