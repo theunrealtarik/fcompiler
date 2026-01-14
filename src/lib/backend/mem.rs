@@ -186,6 +186,7 @@ pub enum VariableLocation {
     STK(StackSlot),
 }
 
+#[allow(clippy::from_over_into)]
 impl Into<Register> for VariableLocation {
     fn into(self) -> Register {
         match self {
