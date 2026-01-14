@@ -1,8 +1,12 @@
 use super::ast::*;
+use super::lexemes;
 use crate::error::*;
 use crate::game::SignalId;
 
+use crate::chstring;
+
 pub fn parse(src: &str) -> Result<Program, CompileError> {
+    use super::lexemes::*;
     let mut stmts: Vec<StatementContext> = Vec::new();
 
     for (idx, line) in src.lines().enumerate() {
@@ -13,18 +17,20 @@ pub fn parse(src: &str) -> Result<Program, CompileError> {
             continue;
         }
 
-        if !line.ends_with("}") && !line.ends_with(";") {
+        if !line.ends_with(CH_SEMICOLON) {
             return Err(CompileError::new(
                 CompileErrorKind::Parse(ParseError::MissingSemicolon),
                 Some(line_span),
             ));
         }
 
-        if line.starts_with("out(") && line.ends_with(");") {
+        if line.starts_with(&chstring!(KW_OUT, CH_LPARAN))
+            && line.ends_with(&chstring!(CH_RPARAN, CH_SEMICOLON))
+        {
             let inner = &line[4..line.len() - 2].trim();
 
             let (ident, signal_type) = inner
-                .split_once(",")
+                .split_once(CH_COMMA)
                 .map(|(n, t)| (n.trim(), SignalId::from_str(t.trim()).ok()))
                 .unwrap_or_else(|| (inner, None));
 
@@ -57,13 +63,26 @@ pub fn parse(src: &str) -> Result<Program, CompileError> {
             continue;
         }
 
-        if line.starts_with("let ") && line.ends_with(";") {
-            let line = line.trim();
-            let rest = &line[4..line.len() - 1];
-            let (ident, expr) = rest.trim().split_once("=").unwrap();
+        if let Some((l_chunk, r_chunk)) = line.split_once("=") {
+            let l_chunk = l_chunk.trim();
+            let r_chunk = r_chunk.trim();
+
+            let ident_slice = if l_chunk.starts_with("let") {
+                4
+            } else if !l_chunk.contains(" ") {
+                0
+            } else {
+                return Err(CompileError::new(
+                    CompileErrorKind::Parse(ParseError::UnexpectedPattern),
+                    Some(line_span),
+                ));
+            };
+
+            let ident = &(l_chunk)[ident_slice..];
+            let expr = &(r_chunk)[..r_chunk.len() - 1];
 
             let (ident, signal_id) = ident
-                .split_once(":")
+                .split_once(CH_COLON)
                 .map(|(n, t)| (n.trim(), SignalId::from_str(t.trim()).ok()))
                 .unwrap_or_else(|| (ident.trim(), None));
 
@@ -74,7 +93,7 @@ pub fn parse(src: &str) -> Result<Program, CompileError> {
                 ));
             }
 
-            let tokens = Token::tokenize(expr.trim());
+            let tokens = Token::tokenize(expr);
             let mut parser = Lexer::new(&tokens);
             let expr = match parser.parse_expression(0) {
                 Ok(e) => e,
@@ -88,14 +107,25 @@ pub fn parse(src: &str) -> Result<Program, CompileError> {
                 ));
             }
 
-            stmts.push(StatementContext::new(
-                StatementKind::Let {
-                    ident: String::from(ident),
-                    sigid: signal_id,
-                    expr,
-                },
-                line_span,
-            ));
+            if l_chunk.starts_with(KW_LET) {
+                stmts.push(StatementContext::new(
+                    StatementKind::Declare {
+                        ident: String::from(ident),
+                        sigid: signal_id,
+                        expr,
+                    },
+                    line_span,
+                ));
+            } else {
+                stmts.push(StatementContext::new(
+                    StatementKind::Assign {
+                        ident: String::from(ident),
+                        expr,
+                    },
+                    line_span,
+                ))
+            }
+
             continue;
         }
 
@@ -113,14 +143,14 @@ fn validate_identifier(s: &str) -> bool {
     match chars.next() {
         None => return false,
         Some(c) => {
-            if !(c.is_ascii_alphabetic() || c == '_') {
+            if !(c.is_ascii_alphabetic() || c == lexemes::CH_UNDERSCORE) {
                 return false;
             }
         }
     }
 
     for c in chars {
-        if !(c.is_ascii_alphanumeric() || c == '_') {
+        if !(c.is_ascii_alphanumeric() || c == lexemes::CH_UNDERSCORE) {
             return false;
         }
     }
@@ -157,7 +187,7 @@ impl Token {
                 'a'..='z' | 'A'..='Z' | '_' => {
                     let mut ident = String::new();
                     while let Some(&c) = chars.peek() {
-                        if c.is_alphanumeric() || c == '_' {
+                        if c.is_alphanumeric() || c == lexemes::CH_UNDERSCORE {
                             ident.push(c);
                             chars.next();
                         } else {
@@ -301,9 +331,9 @@ impl<'a> Lexer<'a> {
             Some(Token::Minus) => {
                 match self.parse_expression(Token::Minus.precedence().unwrap() + 1) {
                     Ok(expr) => Ok(Expression::Op {
-                        lhs: Box::new(Expression::Value(Signal::from(0))),
+                        lhs: Box::new(Expression::Value(Signal::from(-1))),
                         rhs: Box::new(expr),
-                        op: Sign::Sub,
+                        op: Sign::Mul,
                     }),
                     Err(k) => Err(k),
                 }

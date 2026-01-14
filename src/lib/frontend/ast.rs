@@ -13,9 +13,13 @@ impl Span {
 
 #[derive(Debug, Clone)]
 pub enum StatementKind {
-    Let {
+    Declare {
         ident: String,
         sigid: Option<crate::game::SignalId>,
+        expr: Expression,
+    },
+    Assign {
+        ident: String,
         expr: Expression,
     },
     Out(Signal),

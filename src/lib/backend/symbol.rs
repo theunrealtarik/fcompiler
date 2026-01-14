@@ -30,7 +30,7 @@ impl SymbolTable {
     ) -> Option<&crate::backend::mem::Variable> {
         self.iter()
             .find(|(_, var)| match var.loc {
-                crate::backend::mem::Location::REG(r) => r == *reg,
+                crate::backend::mem::VariableLocation::REG(r) => r == *reg,
                 _ => false,
             })
             .map(|(_, v)| v)

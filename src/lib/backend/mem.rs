@@ -123,7 +123,7 @@ impl RegisterAllocator {
 pub struct StackSlot(Register);
 
 impl std::ops::Deref for StackSlot {
-    type Target = u8;
+    type Target = Register;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -181,22 +181,55 @@ impl Default for StackAllocator {
 
 // location
 #[derive(Debug, Clone, Copy, strum_macros::Display)]
-pub enum Location {
+pub enum VariableLocation {
+    REG(Register),
+    STK(StackSlot),
+}
+
+impl Into<Register> for VariableLocation {
+    fn into(self) -> Register {
+        match self {
+            VariableLocation::REG(r) => r,
+            VariableLocation::STK(s) => *s,
+        }
+    }
+}
+
+impl VariableLocation {
+    pub fn as_register(&self) -> &Register {
+        match self {
+            VariableLocation::REG(r) => r,
+            VariableLocation::STK(s) => &*s,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, strum_macros::Display)]
+pub enum OperandLocation {
     REG(Register),
     STK(StackSlot),
     IMM(i32),
+}
+
+impl From<VariableLocation> for OperandLocation {
+    fn from(value: VariableLocation) -> Self {
+        match value {
+            VariableLocation::REG(r) => OperandLocation::REG(r),
+            VariableLocation::STK(s) => OperandLocation::STK(s),
+        }
+    }
 }
 
 // variable
 #[derive(Debug)]
 pub struct Variable {
     pub name: String,
-    pub loc: Location,
+    pub loc: VariableLocation,
     pub signal: Option<crate::game::SignalId>,
 }
 
 impl Variable {
-    pub fn new(name: String, loc: Location, signal: Option<crate::game::SignalId>) -> Self {
+    pub fn new(name: String, loc: VariableLocation, signal: Option<crate::game::SignalId>) -> Self {
         Self { name, loc, signal }
     }
 }

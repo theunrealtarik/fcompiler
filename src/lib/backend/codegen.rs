@@ -29,29 +29,37 @@ impl Generator {
     pub fn generate(&mut self) -> Result<&str, CompileError> {
         for stmt in self.program.clone() {
             match stmt.kind {
-                StatementKind::Let { ident, sigid, expr } => match self.proc_expr(&expr) {
+                StatementKind::Declare { ident, sigid, expr } => match self.proc_expr(&expr) {
                     Ok(loc) => {
-                        let reg = match loc {
-                            Location::REG(r) => r,
-                            Location::STK(_s) => todo!(),
-                            Location::IMM(n) => {
-                                let r = self.registors.alloc().unwrap();
-                                match sigid {
-                                    Some(s) => self.asm.reg_item(r, &n, &Some(s.format())),
-                                    None => self.asm.mov(r, n),
-                                }
-
-                                r
-                            }
-                        };
-
+                        let reg = self.ensure_reg(loc);
                         self.symbols.insert(
                             ident.to_string(),
-                            Variable::new(ident.to_string(), Location::REG(reg), sigid),
+                            Variable::new(ident.to_string(), VariableLocation::REG(reg), sigid),
                         );
                     }
                     Err(kind) => return Err(CompileError::new(kind, Some(stmt.span))),
                 },
+                StatementKind::Assign { ident, expr } => {
+                    let var = match self.symbols.get_mut(&ident) {
+                        Some(v) => v,
+                        None => {
+                            return Err::<&str, CompileError>(CompileError::new(
+                                CompileErrorKind::Semantic(SemanticError::UndefinedVariable(ident)),
+                                Some(stmt.span),
+                            ));
+                        }
+                    };
+
+                    let prev_reg = *var.loc.as_register();
+                    let loc = match self.proc_expr(&expr) {
+                        Ok(location) => location,
+                        Err(kind) => return Err(CompileError::new(kind, Some(stmt.span))),
+                    };
+
+                    let reg = self.ensure_reg(loc);
+                    self.asm.mov(prev_reg, reg);
+                    self.registors.free(prev_reg);
+                }
                 StatementKind::Out(signal) => match signal.value {
                     SignalValue::Num(scalar) => {
                         let signal = signal.id.map(|s| s.format());
@@ -62,16 +70,8 @@ impl Generator {
                             if let Some(sigid) = signal.id {
                                 let caster = self.registors.alloc().unwrap();
                                 let reg = match var.loc {
-                                    Location::REG(r) => r,
-                                    Location::STK(_) => todo!(),
-                                    _ => {
-                                        return Err(CompileError::new(
-                                            CompileErrorKind::Generation(
-                                                GeneratorError::NonAddressableLocation,
-                                            ),
-                                            Some(stmt.span),
-                                        ));
-                                    }
+                                    VariableLocation::REG(r) => r,
+                                    VariableLocation::STK(_) => todo!(),
                                 };
 
                                 self.asm.reg_item(caster, &1, &Some(sigid.format()));
@@ -79,13 +79,9 @@ impl Generator {
 
                                 self.registors.free(reg);
                                 self.asm.clr(Some(reg));
-                                var.loc = Location::REG(caster);
+                                var.loc = VariableLocation::REG(caster);
                             }
-
-                            match var.loc {
-                                Location::REG(r) => self.asm.out_reg(self.outputs.out(), r),
-                                _ => continue,
-                            }
+                            self.asm.out_reg(self.outputs.out(), var.loc.into());
                         } else {
                             return Err(CompileError::new(
                                 CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
@@ -102,10 +98,10 @@ impl Generator {
         Ok(self.asm.finish())
     }
 
-    fn proc_expr(&mut self, expr: &Expression) -> Result<Location, CompileErrorKind> {
+    fn proc_expr(&mut self, expr: &Expression) -> Result<OperandLocation, CompileErrorKind> {
         match expr {
             Expression::Value(signal) => match &signal.value {
-                SignalValue::Num(n) => Ok(Location::IMM(*n)),
+                SignalValue::Num(n) => Ok(OperandLocation::IMM(*n)),
                 SignalValue::Var(r_ident) => {
                     let var = self
                         .symbols
@@ -117,10 +113,7 @@ impl Generator {
                         })
                         .unwrap();
 
-                    match var.loc {
-                        Location::REG(r) => Ok(Location::REG(r)),
-                        _ => todo!(),
-                    }
+                    Ok(var.loc.into())
                 }
             },
             Expression::Op { lhs, rhs, op } => {
@@ -137,24 +130,24 @@ impl Generator {
 
     fn lower_op(
         &mut self,
-        lhs: Location,
-        rhs: Location,
+        lhs: OperandLocation,
+        rhs: OperandLocation,
         op: &Sign,
-    ) -> Result<Location, CompileErrorKind> {
+    ) -> Result<OperandLocation, CompileErrorKind> {
         match (lhs, rhs) {
             // X: R OP R
-            (Location::REG(lhs), Location::REG(rhs)) => {
+            (OperandLocation::REG(lhs), OperandLocation::REG(rhs)) => {
                 let dst = self.registors.alloc().unwrap();
                 self.omit_op(op, dst, Some(lhs), rhs);
 
                 self.free_unmapped(lhs);
                 self.free_unmapped(rhs);
 
-                Ok(Location::REG(dst))
+                Ok(OperandLocation::REG(dst))
             }
 
             // X: N OP M
-            (Location::IMM(n), Location::IMM(m)) => {
+            (OperandLocation::IMM(n), OperandLocation::IMM(m)) => {
                 let r = match op {
                     Sign::Add => n + m,
                     Sign::Sub => n - m,
@@ -165,28 +158,28 @@ impl Generator {
 
                 // let reg = self.registors.alloc().unwrap();
                 // self.asm.mov(reg, r);
-                Ok(Location::IMM(r))
+                Ok(OperandLocation::IMM(r))
             }
 
             // X: R OP N
-            (Location::REG(lhs), Location::IMM(n)) => {
+            (OperandLocation::REG(lhs), OperandLocation::IMM(n)) => {
                 let dst = self.registors.alloc().unwrap();
                 self.omit_op(op, dst, Some(lhs), n);
                 self.free_unmapped(lhs);
-                Ok(Location::REG(dst))
+                Ok(OperandLocation::REG(dst))
             }
 
             // X: N OP R
-            (Location::IMM(n), Location::REG(rhs)) => {
+            (OperandLocation::IMM(n), OperandLocation::REG(rhs)) => {
                 if op.is_commutative() {
-                    return self.lower_op(Location::REG(rhs), Location::IMM(n), op);
+                    return self.lower_op(OperandLocation::REG(rhs), OperandLocation::IMM(n), op);
                 }
 
                 let dst = self.registors.alloc().unwrap();
                 self.omit_op(op, dst, Some(rhs), n);
                 self.free_unmapped(rhs);
 
-                Ok(Location::REG(dst))
+                Ok(OperandLocation::REG(dst))
             }
             _ => unimplemented!("CASE NOT IMPLEMENTED"),
         }
@@ -212,6 +205,18 @@ impl Generator {
 
         if sym.is_none() {
             self.registors.free(r);
+        }
+    }
+
+    fn ensure_reg(&mut self, loc: OperandLocation) -> Register {
+        match loc {
+            OperandLocation::REG(r) => r,
+            OperandLocation::STK(_s) => todo!(),
+            OperandLocation::IMM(n) => {
+                let r = self.registors.alloc().unwrap();
+                self.asm.mov(r, n);
+                r
+            }
         }
     }
 }
