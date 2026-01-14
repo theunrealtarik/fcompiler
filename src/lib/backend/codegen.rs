@@ -126,18 +126,21 @@ impl Generator {
                 self.lower_op(lhs_loc, rhs_loc, op)
             }
             Expression::UnaryOp { expr, op } => {
-                let loc = self.proc_expr(&expr)?;
+                let loc = match self.proc_expr(&expr)? {
+                    OperandLocation::IMM(n) => OperandLocation::IMM(-n),
+                    o => o,
+                };
 
                 let dst = self.registors.alloc().unwrap();
                 let reg = self.ensure_reg(loc);
 
                 match op {
                     UnarySign::Neg => self.asm.mul(dst, Some(reg), -1),
-                    UnarySign::Not => {}
+                    UnarySign::Not => todo!(),
                 }
 
-                self.registors.free(reg);
-                Ok(loc)
+                self.registors.free(dst);
+                Ok(OperandLocation::REG(dst))
             }
         }
     }

@@ -11,6 +11,7 @@ pub enum ParseError {
     MissingSemicolon,
     MissingSignalType,
     InvalidIdentifier,
+    ReservedKeyword { keyword: String },
 }
 
 impl fmt::Display for ParseError {
@@ -24,6 +25,9 @@ impl fmt::Display for ParseError {
             ParseError::MissingSemicolon => write!(f, "missing semicolon."),
             ParseError::MissingSignalType => write!(f, "missing signal type."),
             ParseError::InvalidIdentifier => write!(f, "invalid identifier."),
+            ParseError::ReservedKeyword { keyword } => {
+                write!(f, "expected identifier, {} is a reserved keyword.", keyword)
+            }
         }
     }
 }
@@ -112,7 +116,7 @@ impl CompileError {
 impl fmt::Display for CompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.span {
-            Some(span) => write!(f, "{} (line: {})", self.kind, span.line),
+            Some(span) => write!(f, "(line: {}) {}", span.line, self.kind),
             None => write!(f, "{}", self.kind),
         }
     }

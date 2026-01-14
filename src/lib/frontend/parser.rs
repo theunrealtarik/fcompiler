@@ -89,6 +89,15 @@ pub fn parse(src: &str) -> Result<Program, CompileError> {
                 .map(|(n, t)| (n.trim(), SignalId::from_str(t.trim()).ok()))
                 .unwrap_or_else(|| (ident.trim(), None));
 
+            if RESERVED_KEYWORDS.contains(&ident) {
+                return Err(CompileError::new(
+                    CompileErrorKind::Parse(ParseError::ReservedKeyword {
+                        keyword: ident.to_string(),
+                    }),
+                    Some(line_span),
+                ));
+            }
+
             if !validate_identifier(ident) {
                 return Err(CompileError::new(
                     CompileErrorKind::Parse(ParseError::InvalidIdentifier),
@@ -96,7 +105,11 @@ pub fn parse(src: &str) -> Result<Program, CompileError> {
                 ));
             }
 
-            let tokens = Token::tokenize(expr);
+            let tokens = match Token::tokenize(expr) {
+                Ok(t) => t,
+                Err(k) => return Err(CompileError::new(k, Some(line_span))),
+            };
+
             let mut parser = Lexer::new(&tokens);
             let expr = match parser.parse_expression(0) {
                 Ok(e) => e,
@@ -185,10 +198,12 @@ pub enum Token {
     RParen,
     #[strum(serialize = ";")]
     Semicolon,
+    #[strum(serialize = "!")]
+    Bang,
 }
 
 impl Token {
-    pub fn tokenize(stream: &str) -> Vec<Self> {
+    pub fn tokenize(stream: &str) -> Result<Vec<Self>, CompileErrorKind> {
         use lexemes::*;
         let mut tokens: Vec<Token> = Vec::new();
         let mut chars = stream.chars().peekable();
@@ -208,7 +223,21 @@ impl Token {
                             break;
                         }
                     }
-                    tokens.push(Token::Ident(ident));
+
+                    let ident = ident.as_str();
+
+                    if ident == KW_TRUE || ident == KW_FALSE {
+                        tokens.push(Token::Boolean(ident.parse::<bool>().unwrap()));
+                        continue;
+                    }
+
+                    if RESERVED_KEYWORDS.contains(&ident) {
+                        return Err(CompileErrorKind::Parse(ParseError::ReservedKeyword {
+                            keyword: ident.to_string(),
+                        }));
+                    }
+
+                    tokens.push(Token::Ident(ident.to_string()));
                 }
                 '0'..='9' => {
                     let mut num = 0;
@@ -225,7 +254,7 @@ impl Token {
                     tokens.push(Token::Number(num));
                 }
                 CH_ADD | CH_SUB | CH_MUL | CH_DIV | CH_MOD | CH_EQ | CH_SEMICOLON | CH_LPARAN
-                | CH_RPARAN => {
+                | CH_RPARAN | CH_NOT => {
                     if let Ok(t) = Token::from_str(&ch.to_string()) {
                         tokens.push(t);
                         chars.next();
@@ -237,7 +266,7 @@ impl Token {
             }
         }
 
-        tokens
+        Ok(tokens)
     }
 
     pub fn precedence(&self) -> Option<u8> {
@@ -303,6 +332,7 @@ impl<'a> Lexer<'a> {
         match self.next() {
             Some(Token::Number(n)) => Ok(Expression::Value(Signal::from(*n))),
             Some(Token::Ident(name)) => Ok(Expression::Value(Signal::from(name.to_string()))),
+            Some(Token::Boolean(b)) => Ok(Expression::Value(Signal::from(*b as i32))),
             Some(Token::LParen) => {
                 let expr = self.parse_expression(0);
                 match self.next() {
@@ -324,6 +354,7 @@ impl<'a> Lexer<'a> {
                     Err(k) => Err(k),
                 }
             }
+
             Some(tok) => Err(CompileErrorKind::Lex(LexerError::InvalidExpression(
                 format!("{:?}", tok),
             ))),
