@@ -28,7 +28,7 @@ args = ["./scripts/signals/main.lua"]
 [tasks.debug]
 env = { "RUST_LOG" = "debug" }
 command = "cargo"
-args = ["run"]
+args = ["run", "--", "./test/program.ffc"]
 
 [tasks.flow]
 dependencies = ["format", "generate", "build", "test"]

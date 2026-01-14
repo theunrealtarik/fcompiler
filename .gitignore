@@ -1,4 +1,6 @@
 /target
+# /test/**/*.fc
+
 .vscode
 .git
 .github

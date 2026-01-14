@@ -40,7 +40,7 @@ impl Generator {
                     Err(kind) => return Err(CompileError::new(kind, Some(stmt.span))),
                 },
                 StatementKind::Assign { ident, expr } => {
-                    let var = match self.symbols.get_mut(&ident) {
+                    let var = match self.symbols.get(&ident) {
                         Some(v) => v,
                         None => {
                             return Err::<&str, CompileError>(CompileError::new(
@@ -56,8 +56,11 @@ impl Generator {
                         Err(kind) => return Err(CompileError::new(kind, Some(stmt.span))),
                     };
 
-                    // let reg = self.ensure_reg(loc);
-                    // self.asm.mov(prev_reg, reg);
+                    let reg = self.ensure_reg(loc);
+
+                    let var = self.symbols.get_mut(&ident).unwrap();
+                    var.loc = VariableLocation::REG(reg);
+
                     self.registors.free(prev_reg);
                 }
                 StatementKind::Out(signal) => match signal.value {
@@ -78,7 +81,6 @@ impl Generator {
                                 self.asm.mul::<_, String, _>(caster, None, reg);
 
                                 self.registors.free(reg);
-                                self.asm.clr(Some(reg));
                                 var.loc = VariableLocation::REG(caster);
                             }
                             self.asm.out_reg(self.outputs.out(), var.loc.into());
@@ -126,21 +128,26 @@ impl Generator {
                 self.lower_op(lhs_loc, rhs_loc, op)
             }
             Expression::UnaryOp { expr, op } => {
-                let loc = match self.proc_expr(&expr)? {
+                let loc = match self.proc_expr(expr)? {
                     OperandLocation::IMM(n) => OperandLocation::IMM(-n),
-                    o => o,
+                    opr => opr,
                 };
 
-                let dst = self.registors.alloc().unwrap();
-                let reg = self.ensure_reg(loc);
-
+                let mut reg = self.ensure_reg(loc);
                 match op {
-                    UnarySign::Neg => self.asm.mul(dst, Some(reg), -1),
-                    UnarySign::Not => todo!(),
+                    UnarySign::Neg => {
+                        if !loc.is_imm() {
+                            let dst = self.registors.alloc().unwrap();
+                            self.asm.mul(dst, Some(reg), -1);
+                            reg = dst;
+                        }
+                    }
+                    UnarySign::Not => {
+                        self.asm.not(reg);
+                    }
                 }
 
-                // self.registors.free(dst);
-                Ok(OperandLocation::REG(dst))
+                Ok(OperandLocation::REG(reg))
             }
         }
     }

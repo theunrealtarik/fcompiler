@@ -94,6 +94,14 @@ impl Asm {
         self.arith_op(&"add", dst, src, val);
     }
 
+    pub fn addi<D, V>(&mut self, dst: D, val: V)
+    where
+        D: std::fmt::Display + std::fmt::Debug,
+        V: std::fmt::Display + std::fmt::Debug,
+    {
+        self.add::<D, String, V>(dst, None, val);
+    }
+
     // SUB
     pub fn sub<D, S, V>(&mut self, dst: D, src: Option<S>, val: V)
     where
@@ -149,14 +157,37 @@ impl Asm {
         }
         self.arith_op(&"mod", dst, src, val);
     }
-    pub fn inc<D: std::fmt::Display + std::fmt::Debug>(&mut self, dst: D) {
+    pub fn inc<D>(&mut self, dst: D)
+    where
+        D: std::fmt::Display + std::fmt::Debug + Copy,
+    {
         debug!("{:?} += 1", dst);
         self.code.push_str(&format!("inc {}\n", dst));
     }
 
-    pub fn dec<D: std::fmt::Display + std::fmt::Debug>(&mut self, dst: D) {
+    pub fn dec<D>(&mut self, dst: D)
+    where
+        D: std::fmt::Display + std::fmt::Debug,
+    {
         debug!("{:?} -= 1", dst);
         self.code.push_str(&format!("inc {}\n", dst));
+    }
+
+    pub fn neg<D>(&mut self, dst: D)
+    where
+        D: std::fmt::Display + std::fmt::Debug,
+    {
+        debug!("-{:?}", dst);
+        self.mul::<D, String, i32>(dst, None, -1);
+    }
+
+    pub fn not<D>(&mut self, dst: D)
+    where
+        D: std::fmt::Display + std::fmt::Debug + Copy,
+    {
+        debug!("!{:?}", dst);
+        self.neg(dst);
+        self.inc(dst);
     }
 
     pub fn finish(&self) -> &str {

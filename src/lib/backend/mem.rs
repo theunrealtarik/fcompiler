@@ -75,7 +75,9 @@ impl RegisterAllocator {
         let idx = self.free.trailing_zeros();
         let mask = !(1u64 << idx);
         self.free &= mask;
-        Ok(Register(idx as u8))
+
+        let r = Register(idx as u8);
+        Ok(r)
     }
 
     pub fn free(&mut self, r: Register) {
@@ -208,7 +210,7 @@ impl VariableLocation {
     }
 }
 
-#[derive(Debug, Clone, Copy, strum_macros::Display)]
+#[derive(Debug, Clone, Copy, strum_macros::Display, strum_macros::EnumIs)]
 pub enum OperandLocation {
     REG(Register),
     STK(StackSlot),
