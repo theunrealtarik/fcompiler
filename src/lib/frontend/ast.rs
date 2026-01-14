@@ -96,10 +96,7 @@ pub enum Sign {
 
 impl Sign {
     pub fn is_commutative(&self) -> bool {
-        match self {
-            Self::Add | Self::Mul => true,
-            _ => false,
-        }
+        matches!(self, Self::Add | Self::Mul)
     }
 }
 

@@ -1,3 +1,6 @@
+use core::panic;
+use std::str::FromStr;
+
 use super::ast::*;
 use super::lexemes;
 use crate::error::*;
@@ -159,25 +162,36 @@ fn validate_identifier(s: &str) -> bool {
 }
 
 // tokenizer
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, strum_macros::EnumString, strum_macros::Display)]
 pub enum Token {
     Number(i32),
     Ident(String),
+    Boolean(bool),
+    #[strum(serialize = "+")]
     Plus,
+    #[strum(serialize = "-")]
     Minus,
+    #[strum(serialize = "*")]
     Star,
+    #[strum(serialize = "/")]
     Slash,
+    #[strum(serialize = "%")]
     Percent,
+    #[strum(serialize = "=")]
     Equal,
+    #[strum(serialize = "(")]
     LParen,
+    #[strum(serialize = ")")]
     RParen,
+    #[strum(serialize = ";")]
     Semicolon,
 }
 
 impl Token {
-    pub fn tokenize(src: &str) -> Vec<Self> {
+    pub fn tokenize(stream: &str) -> Vec<Self> {
+        use lexemes::*;
         let mut tokens: Vec<Token> = Vec::new();
-        let mut chars = src.chars().peekable();
+        let mut chars = stream.chars().peekable();
 
         while let Some(&ch) = chars.peek() {
             match ch {
@@ -210,41 +224,14 @@ impl Token {
 
                     tokens.push(Token::Number(num));
                 }
-                '+' => {
-                    tokens.push(Token::Plus);
-                    chars.next();
-                }
-                '-' => {
-                    tokens.push(Token::Minus);
-                    chars.next();
-                }
-                '*' => {
-                    tokens.push(Token::Star);
-                    chars.next();
-                }
-                '/' => {
-                    tokens.push(Token::Slash);
-                    chars.next();
-                }
-                '%' => {
-                    tokens.push(Token::Percent);
-                    chars.next();
-                }
-                '=' => {
-                    tokens.push(Token::Equal);
-                    chars.next();
-                }
-                ';' => {
-                    tokens.push(Token::Semicolon);
-                    chars.next();
-                }
-                '(' => {
-                    tokens.push(Token::LParen);
-                    chars.next();
-                }
-                ')' => {
-                    tokens.push(Token::RParen);
-                    chars.next();
+                CH_ADD | CH_SUB | CH_MUL | CH_DIV | CH_MOD | CH_EQ | CH_SEMICOLON | CH_LPARAN
+                | CH_RPARAN => {
+                    if let Ok(t) = Token::from_str(&ch.to_string()) {
+                        tokens.push(t);
+                        chars.next();
+                    } else {
+                        continue;
+                    }
                 }
                 _ => panic!("unknown character"),
             }
