@@ -31,11 +31,13 @@ impl Generator {
                 StatementKind::Declare { ident, sigid, expr } => match self.proc_expr(&expr) {
                     Ok(loc) => {
                         let reg = self.ensure_reg(loc);
+                        log::debug!("{:#?}", expr);
                         self.symbols.insert(
                             ident.to_string(),
                             Variable::new(ident.to_string(), VariableLocation::REG(reg), sigid),
                         );
                     }
+
                     Err(kind) => return Err(CompileError::new(kind, Some(stmt.span))),
                 },
                 StatementKind::Assign { ident, expr } => {
@@ -104,15 +106,14 @@ impl Generator {
             Expression::Value(signal) => match &signal.value {
                 SignalValue::Num(n) => Ok(OperandLocation::IMM(*n)),
                 SignalValue::Var(r_ident) => {
-                    let var = self
-                        .symbols
-                        .get(r_ident)
-                        .ok_or_else(|| {
-                            CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
-                                r_ident.clone(),
-                            ))
-                        })
-                        .unwrap();
+                    let var = match self.symbols.get(r_ident) {
+                        Some(loc) => loc,
+                        None => {
+                            return Err(CompileErrorKind::Semantic(
+                                SemanticError::UndefinedVariable(r_ident.clone()),
+                            ));
+                        }
+                    };
 
                     Ok(var.loc.into())
                 }

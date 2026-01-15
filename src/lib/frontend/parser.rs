@@ -354,6 +354,13 @@ impl<'a> Lexer<'a> {
                     Err(k) => Err(k),
                 }
             }
+            Some(Token::Bang) => match self.parse_expression(0) {
+                Ok(expr) => Ok(Expression::UnaryOp {
+                    expr: Box::new(expr),
+                    op: UnarySign::Not,
+                }),
+                Err(k) => Err(k),
+            },
 
             Some(tok) => Err(CompileErrorKind::Lex(LexerError::InvalidExpression(
                 format!("{:?}", tok),

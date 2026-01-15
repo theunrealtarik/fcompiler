@@ -116,7 +116,7 @@ impl CompileError {
 impl fmt::Display for CompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.span {
-            Some(span) => write!(f, "(line: {}) {}", span.line, self.kind),
+            Some(span) => write!(f, "(line: {}) {}", span.line + 1, self.kind),
             None => write!(f, "{}", self.kind),
         }
     }
