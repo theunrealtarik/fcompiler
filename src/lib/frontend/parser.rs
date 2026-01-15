@@ -200,6 +200,14 @@ pub enum Token {
     Semicolon,
     #[strum(serialize = "!")]
     Bang,
+    #[strum(serialize = "&")]
+    And,
+    #[strum(serialize = "|")]
+    Or,
+    #[strum(serialize = "&&")]
+    AndAnd,
+    #[strum(serialize = "||")]
+    OrOr,
 }
 
 impl Token {
@@ -262,6 +270,24 @@ impl Token {
                         continue;
                     }
                 }
+                CH_AND => {
+                    chars.next();
+                    if let Some(nx) = chars.next() {
+                        match nx {
+                            CH_AND => tokens.push(Token::AndAnd),
+                            _ => tokens.push(Token::And),
+                        }
+                    }
+                }
+                CH_OR => {
+                    chars.next();
+                    if let Some(nx) = chars.next() {
+                        match nx {
+                            CH_OR => tokens.push(Token::OrOr),
+                            _ => tokens.push(Token::Or),
+                        }
+                    }
+                }
                 _ => panic!("unknown character"),
             }
         }
@@ -271,8 +297,11 @@ impl Token {
 
     pub fn precedence(&self) -> Option<u8> {
         match self {
-            Token::Plus | Token::Minus => Some(10),
-            Token::Star | Token::Slash | Token::Percent => Some(20),
+            Token::Bang => Some(10),
+            Token::Star | Token::Slash | Token::Percent => Some(9),
+            Token::Plus | Token::Minus => Some(8),
+            Token::AndAnd => Some(3),
+            Token::OrOr => Some(2),
             _ => None,
         }
     }
@@ -312,6 +341,8 @@ impl<'a> Lexer<'a> {
                 Token::Star => Sign::Mul,
                 Token::Slash => Sign::Div,
                 Token::Percent => Sign::Mod,
+                Token::AndAnd => Sign::Mul,
+                Token::OrOr => Sign::Add,
                 _ => break,
             };
 
@@ -354,7 +385,7 @@ impl<'a> Lexer<'a> {
                     Err(k) => Err(k),
                 }
             }
-            Some(Token::Bang) => match self.parse_expression(0) {
+            Some(Token::Bang) => match self.parse_expression(Token::Bang.precedence().unwrap()) {
                 Ok(expr) => Ok(Expression::UnaryOp {
                     expr: Box::new(expr),
                     op: UnarySign::Not,

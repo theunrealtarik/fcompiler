@@ -43,10 +43,10 @@ impl Generator {
 
                     let mut variable =
                         Variable::new(ident.to_string(), VariableLocation::REG(rhs_reg), sigid);
+
                     if let Some(_) = self.symbols.get_by_register(&rhs_reg) {
                         let lhs_reg = self.memory.alloc().map_err(|kind| (kind, stmt.span))?;
-                        variable =
-                            Variable::new(ident.to_string(), VariableLocation::REG(lhs_reg), sigid);
+                        variable.loc = VariableLocation::REG(lhs_reg);
                         self.asm.mov(lhs_reg, rhs_reg);
                     }
 
@@ -138,32 +138,34 @@ impl Generator {
 
                 self.lower_op(lhs_loc, rhs_loc, op)
             }
-            Expression::UnaryOp { expr, op } => {
-                let loc = match self.proc_expr(expr)? {
-                    OperandLocation::IMM(n) => OperandLocation::IMM(-n),
-                    opr => opr,
-                };
+            Expression::UnaryOp { expr, op } => match op {
+                UnarySign::Neg => {
+                    let loc = match self.proc_expr(expr)? {
+                        OperandLocation::IMM(n) => OperandLocation::IMM(-n),
+                        opr => opr,
+                    };
 
-                let mut rhs = self.ensure_reg(loc);
-                match op {
-                    UnarySign::Neg => {
-                        if !loc.is_imm() {
-                            let dst = self.memory.alloc().unwrap();
-                            if rhs == dst {
-                                self.asm.muli(dst, -1);
-                            } else {
-                                self.asm.mul(dst, Some(rhs), -1);
-                            }
-
-                            self.free_unmapped(rhs);
-                            rhs = dst;
+                    let rhs = self.ensure_reg(loc);
+                    if !loc.is_imm() {
+                        let dst = self.memory.alloc().unwrap();
+                        if rhs == dst {
+                            self.asm.muli(dst, -1);
+                        } else {
+                            self.asm.mul(dst, Some(rhs), -1);
                         }
-                    }
-                    UnarySign::Not => self.asm.not(rhs),
-                }
 
-                Ok(OperandLocation::REG(rhs))
-            }
+                        self.free_unmapped(rhs);
+                    }
+
+                    return Ok(OperandLocation::REG(rhs));
+                }
+                UnarySign::Not => {
+                    let loc = self.proc_expr(expr)?;
+                    let rhs = self.ensure_reg(loc);
+                    self.asm.not::<_, String>(rhs, None);
+                    return Ok(OperandLocation::REG(rhs));
+                }
+            },
         }
     }
 
@@ -250,7 +252,9 @@ impl Generator {
             OperandLocation::STK(_s) => todo!(),
             OperandLocation::IMM(n) => {
                 let r = self.memory.alloc().unwrap();
-                self.asm.mov(r, n);
+                if n > 0 {
+                    self.asm.mov(r, n);
+                }
                 r
             }
         }

@@ -1,10 +1,6 @@
-let x = 10;
-let y = 2;
+let x = true && false;
+let y = true || x;
 
-let a = x + y;
-let b = x * y;
+let z = x && y;
 
-let r = (a % x) * (-b / y);
-
-r = -r;
-r = r + 1;
+let r = z || (1 + x);

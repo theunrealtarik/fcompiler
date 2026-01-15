@@ -189,13 +189,20 @@ impl Asm {
         self.mul::<D, String, i32>(dst, None, -1);
     }
 
-    pub fn not<D>(&mut self, dst: D)
+    pub fn not<D, S>(&mut self, dst: D, src: Option<S>)
     where
-        D: std::fmt::Display + std::fmt::Debug + Copy,
+        D: std::fmt::Display + std::fmt::Debug,
+        S: std::fmt::Display + std::fmt::Debug,
     {
         debug!("!{:?}", dst);
-        self.neg(dst);
-        self.inc(dst);
+        self.code.push_str(&format!(
+            "not {} {}\n",
+            dst,
+            match src {
+                Some(s) => format!("{}", s),
+                None => String::new(),
+            }
+        ));
     }
 
     pub fn finish(&self) -> &str {
