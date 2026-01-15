@@ -1,6 +1,7 @@
 use log::debug;
 
 // channeling
+
 pub enum MemoryChannel {
     Chann1,
     Chann2,
@@ -8,27 +9,11 @@ pub enum MemoryChannel {
     Chann4,
 }
 
-// cpu registers (64 registers)
+// cpu registers
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Register(u8);
-
-impl TryFrom<u8> for Register {
-    type Error = crate::error::CompileError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        if value > RegisterAllocator::MAX_REGISTERS {
-            return Err(crate::error::CompileError::new(
-                crate::error::CompileErrorKind::Generation(
-                    crate::error::GeneratorError::InvalidRegister,
-                ),
-                None,
-            ));
-        }
-
-        Ok(Self(value))
-    }
-}
 
 impl std::ops::Deref for Register {
     type Target = u8;
@@ -43,6 +28,8 @@ impl std::fmt::Display for Register {
         write!(f, "r{}", self.0 + 1)
     }
 }
+
+// register allocator
 
 #[derive(Debug)]
 pub struct RegisterAllocator {
@@ -123,7 +110,25 @@ impl RegisterAllocator {
     }
 }
 
+impl TryFrom<u8> for Register {
+    type Error = crate::error::CompileError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        if value > RegisterAllocator::MAX_REGISTERS {
+            return Err(crate::error::CompileError::new(
+                crate::error::CompileErrorKind::Generation(
+                    crate::error::GeneratorError::InvalidRegister,
+                ),
+                None,
+            ));
+        }
+
+        Ok(Self(value))
+    }
+}
+
 // stack
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StackSlot(Register);
 
@@ -184,7 +189,8 @@ impl Default for StackAllocator {
     }
 }
 
-// location
+// locations
+
 #[derive(Debug, Clone, Copy, strum_macros::Display)]
 pub enum VariableLocation {
     REG(Register),
@@ -205,7 +211,7 @@ impl VariableLocation {
     pub fn as_register(&self) -> &Register {
         match self {
             VariableLocation::REG(r) => r,
-            VariableLocation::STK(s) => &*s,
+            VariableLocation::STK(s) => s,
         }
     }
 }
@@ -227,6 +233,7 @@ impl From<VariableLocation> for OperandLocation {
 }
 
 // variable
+
 #[derive(Debug)]
 pub struct Variable {
     pub name: String,
@@ -240,7 +247,8 @@ impl Variable {
     }
 }
 
-// out
+// output
+
 #[derive(Debug, Clone, Copy)]
 pub struct Out(pub u8);
 

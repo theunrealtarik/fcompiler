@@ -1,12 +1,5 @@
 let x = 2;
 let y = 3;
+let z = 4;
 
-let a = x + y;
-let b = x * y;
-
-let r = (a / x) * (-b * y);
-
-r = -r;
-r = r + 1;
-
-out(r, IronPlate);
+let r = -((x + y) * -(y - z)) / (-x * y);

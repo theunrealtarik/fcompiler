@@ -50,18 +50,20 @@ impl Generator {
                         }
                     };
 
-                    let prev_reg = *var.loc.as_register();
-                    let loc = match self.proc_expr(&expr) {
+                    let lhs_reg = *var.loc.as_register();
+                    let rhs_loc = match self.proc_expr(&expr) {
                         Ok(location) => location,
                         Err(kind) => return Err(CompileError::new(kind, Some(stmt.span))),
                     };
 
-                    let reg = self.ensure_reg(loc);
-
-                    let var = self.symbols.get_mut(&ident).unwrap();
-                    var.loc = VariableLocation::REG(reg);
-
-                    self.registors.free(prev_reg);
+                    let rhs_reg = self.ensure_reg(rhs_loc);
+                    if rhs_reg != lhs_reg {
+                        let var = self.symbols.get_mut(&ident).unwrap();
+                        var.loc = VariableLocation::REG(rhs_reg);
+                        self.asm.mov(lhs_reg, rhs_reg);
+                        self.asm.clr(Some(rhs_reg));
+                        self.registors.free(rhs_reg);
+                    }
                 }
                 StatementKind::Out(signal) => match signal.value {
                     SignalValue::Num(scalar) => {
@@ -133,21 +135,20 @@ impl Generator {
                     opr => opr,
                 };
 
-                let mut reg = self.ensure_reg(loc);
+                let mut rhs = self.ensure_reg(loc);
                 match op {
                     UnarySign::Neg => {
                         if !loc.is_imm() {
                             let dst = self.registors.alloc().unwrap();
-                            self.asm.mul(dst, Some(reg), -1);
-                            reg = dst;
+                            self.asm.mul(dst, Some(rhs), -1);
+                            self.free_unmapped(rhs);
+                            rhs = dst;
                         }
                     }
-                    UnarySign::Not => {
-                        self.asm.not(reg);
-                    }
+                    UnarySign::Not => self.asm.not(rhs),
                 }
 
-                Ok(OperandLocation::REG(reg))
+                Ok(OperandLocation::REG(rhs))
             }
         }
     }
@@ -180,27 +181,15 @@ impl Generator {
                     Sign::Mod => n % m,
                 };
 
-                // let reg = self.registors.alloc().unwrap();
-                // self.asm.mov(reg, r);
                 Ok(OperandLocation::IMM(r))
             }
 
             // X: R OP N
             (OperandLocation::REG(lhs), OperandLocation::IMM(n)) => {
                 let dst = self.registors.alloc().unwrap();
-
-                if dst == lhs && n == 1 {
-                    match op {
-                        Sign::Add => self.asm.inc(dst),
-                        Sign::Sub => self.asm.dec(dst),
-                        Sign::Mul => self.asm.mul(dst, Some(lhs), n),
-                        Sign::Div => self.asm.div(dst, Some(lhs), n),
-                        Sign::Mod => self.asm.modu(dst, Some(lhs), n),
-                    }
-                } else {
-                    self.omit_op(op, dst, Some(lhs), n);
-                    self.free_unmapped(lhs);
-                }
+                self.omit_op(op, dst, Some(lhs), n);
+                self.free_unmapped(lhs);
+                self.free_unmapped(dst);
 
                 Ok(OperandLocation::REG(dst))
             }
@@ -238,7 +227,6 @@ impl Generator {
 
     fn free_unmapped(&mut self, r: Register) {
         let sym = self.symbols.get_by_register(&r);
-
         if sym.is_none() {
             self.registors.free(r);
         }

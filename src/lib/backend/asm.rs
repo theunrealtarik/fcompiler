@@ -24,7 +24,7 @@ impl Asm {
         S: std::fmt::Display + std::fmt::Debug,
         D: std::fmt::Display + std::fmt::Debug,
     {
-        debug!("mov {:?} <- {:?}", dst, src);
+        debug!("{:?} = {:?}", dst, src);
         #[allow(clippy::to_string_in_format_args)]
         self.code.push_str(&format!("mov {} {}\n", dst, src));
     }
@@ -128,6 +128,14 @@ impl Asm {
             None => debug!("{:?} = {:?} × {:?}", dst, dst, val),
         }
         self.arith_op(&"mul", dst, src, val);
+    }
+
+    pub fn muli<D, V>(&mut self, dst: D, val: V)
+    where
+        D: std::fmt::Display + std::fmt::Debug,
+        V: std::fmt::Display + std::fmt::Debug,
+    {
+        self.mul::<D, String, V>(dst, None, val);
     }
 
     // DIV
