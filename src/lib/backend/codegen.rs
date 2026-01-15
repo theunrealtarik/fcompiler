@@ -26,27 +26,39 @@ impl Generator {
     }
 
     pub fn generate(&mut self) -> Result<&str, CompileError> {
+        match self.handle_statements() {
+            Ok(asm) => Ok(asm),
+            Err((kind, span)) => Err(CompileError::new(kind, Some(span))),
+        }
+    }
+
+    fn handle_statements(&mut self) -> Result<&str, (CompileErrorKind, Span)> {
         for stmt in self.program.clone() {
             match stmt.kind {
-                StatementKind::Declare { ident, sigid, expr } => match self.proc_expr(&expr) {
-                    Ok(loc) => {
-                        let reg = self.ensure_reg(loc);
-                        log::debug!("{:#?}", expr);
-                        self.symbols.insert(
-                            ident.to_string(),
-                            Variable::new(ident.to_string(), VariableLocation::REG(reg), sigid),
-                        );
+                StatementKind::Declare { ident, sigid, expr } => {
+                    let rhs_reg = match self.proc_expr(&expr) {
+                        Ok(loc) => self.ensure_reg(loc),
+                        Err(kind) => return Err((kind, stmt.span)),
+                    };
+
+                    let mut variable =
+                        Variable::new(ident.to_string(), VariableLocation::REG(rhs_reg), sigid);
+                    if let Some(_) = self.symbols.get_by_register(&rhs_reg) {
+                        let lhs_reg = self.memory.alloc().map_err(|kind| (kind, stmt.span))?;
+                        variable =
+                            Variable::new(ident.to_string(), VariableLocation::REG(lhs_reg), sigid);
+                        self.asm.mov(lhs_reg, rhs_reg);
                     }
 
-                    Err(kind) => return Err(CompileError::new(kind, Some(stmt.span))),
-                },
+                    self.symbols.insert(ident.to_string(), variable);
+                }
                 StatementKind::Assign { ident, expr } => {
                     let var = match self.symbols.get(&ident) {
                         Some(v) => v,
                         None => {
-                            return Err::<&str, CompileError>(CompileError::new(
+                            return Err((
                                 CompileErrorKind::Semantic(SemanticError::UndefinedVariable(ident)),
-                                Some(stmt.span),
+                                stmt.span,
                             ));
                         }
                     };
@@ -54,7 +66,7 @@ impl Generator {
                     let lhs_reg = *var.loc.as_register();
                     let rhs_loc = match self.proc_expr(&expr) {
                         Ok(location) => location,
-                        Err(kind) => return Err(CompileError::new(kind, Some(stmt.span))),
+                        Err(kind) => return Err((kind, stmt.span)),
                     };
 
                     let rhs_reg = self.ensure_reg(rhs_loc);
@@ -85,11 +97,11 @@ impl Generator {
                             }
                             self.asm.out_reg(self.outputs.out(), var.loc.into());
                         } else {
-                            return Err(CompileError::new(
+                            return Err((
                                 CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
                                     ident.clone(),
                                 )),
-                                Some(stmt.span),
+                                stmt.span,
                             ));
                         }
                     }
@@ -97,7 +109,6 @@ impl Generator {
             }
         }
 
-        log::debug!("{:#?}", self.memory.dead_marks());
         Ok(self.asm.finish())
     }
 
@@ -107,7 +118,7 @@ impl Generator {
                 SignalValue::Num(n) => Ok(OperandLocation::IMM(*n)),
                 SignalValue::Var(r_ident) => {
                     let var = match self.symbols.get(r_ident) {
-                        Some(loc) => loc,
+                        Some(v) => v,
                         None => {
                             return Err(CompileErrorKind::Semantic(
                                 SemanticError::UndefinedVariable(r_ident.clone()),
@@ -192,8 +203,6 @@ impl Generator {
                 let dst = self.memory.alloc().unwrap();
                 self.omit_op(op, dst, Some(lhs), n);
                 self.free_unmapped(lhs);
-                self.free_unmapped(dst);
-
                 Ok(OperandLocation::REG(dst))
             }
 

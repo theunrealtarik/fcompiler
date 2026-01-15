@@ -1,1 +1,10 @@
-let x = x;
+let x = 10;
+let y = 2;
+
+let a = x + y;
+let b = x * y;
+
+let r = (a % x) * (-b / y);
+
+r = -r;
+r = r + 1;
