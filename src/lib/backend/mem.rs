@@ -1,5 +1,3 @@
-use log::debug;
-
 // channeling
 
 pub enum MemoryChannel {
@@ -49,34 +47,15 @@ impl RegisterAllocator {
         Self { free: u64::MAX }
     }
 
-    pub fn alloc(&mut self) -> Result<Register, crate::error::CompileError> {
-        if self.free == 0 {
-            return Err(crate::error::CompileError::new(
-                crate::error::CompileErrorKind::Generation(
-                    crate::error::GeneratorError::OutOfRegisters,
-                ),
-                None,
-            ));
-        }
-
+    pub unsafe fn alloc(&mut self) -> Register {
         let idx = self.free.trailing_zeros();
         let mask = !(1u64 << idx);
         self.free &= mask;
 
-        let r = Register(idx as u8);
-        Ok(r)
+        Register(idx as u8)
     }
 
-    pub fn free(&mut self, r: Register) {
-        debug!("free {:?}", r);
-        if *r >= Self::MAX_REGISTERS {
-            return;
-        }
-
-        if !self.is_used(r) {
-            return;
-        }
-
+    pub unsafe fn free(&mut self, r: Register) {
         let mask = 1u64 << *r;
         self.free |= mask;
     }
@@ -283,3 +262,84 @@ impl OutputManager {
         Out(self.last)
     }
 }
+
+// memory manager
+use std::collections::HashMap;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Mark {
+    Alive,
+    Dead,
+}
+
+#[derive(Debug)]
+pub struct MemoryManager {
+    marks: HashMap<Register, Mark>,
+    pub regs: RegisterAllocator,
+    pub stack: StackAllocator,
+}
+
+impl MemoryManager {
+    pub fn new() -> Self {
+        Self {
+            marks: HashMap::new(),
+            regs: RegisterAllocator::new(),
+            stack: StackAllocator::new(),
+        }
+    }
+
+    pub fn free(&mut self, reg: Register) {
+        if *reg >= RegisterAllocator::MAX_REGISTERS {
+            return;
+        }
+
+        if !self.regs.is_used(reg) {
+            return;
+        }
+
+        self.marks.insert(reg, Mark::Dead);
+        unsafe {
+            self.regs.free(reg);
+            log::debug!("free( {:?} )", reg);
+        }
+    }
+
+    pub fn alloc(&mut self) -> Result<Register, crate::error::CompileErrorKind> {
+        if self.regs.free == 0 {
+            return Err(crate::error::CompileErrorKind::Generation(
+                crate::error::GeneratorError::OutOfRegisters,
+            ));
+        }
+
+        let reg = unsafe { self.regs.alloc() };
+        self.marks.insert(reg, Mark::Alive);
+        Ok(reg)
+    }
+
+    pub fn live_marks(&self) -> Vec<Register> {
+        self.marks
+            .iter()
+            .filter(|(_, m)| *m == &Mark::Alive)
+            .map(|(r, _)| *r)
+            .collect::<Vec<Register>>()
+    }
+
+    pub fn marks(&self) -> &HashMap<Register, Mark> {
+        &self.marks
+    }
+
+    pub fn dead_marks(&self) -> Vec<Register> {
+        self.marks
+            .iter()
+            .filter(|(_, m)| *m == &Mark::Dead)
+            .map(|(r, _)| *r)
+            .collect::<Vec<Register>>()
+    }
+}
+
+impl Default for MemoryManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+

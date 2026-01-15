@@ -13,8 +13,7 @@ pub struct Generator {
     symbols: SymbolTable,
     asm: Asm,
     program: Program,
-    registors: RegisterAllocator,
-    stack: StackAllocator,
+    memory: MemoryManager,
     outputs: OutputManager,
 }
 
@@ -58,11 +57,8 @@ impl Generator {
 
                     let rhs_reg = self.ensure_reg(rhs_loc);
                     if rhs_reg != lhs_reg {
-                        let var = self.symbols.get_mut(&ident).unwrap();
-                        var.loc = VariableLocation::REG(rhs_reg);
                         self.asm.mov(lhs_reg, rhs_reg);
-                        self.asm.clr(Some(rhs_reg));
-                        self.registors.free(rhs_reg);
+                        self.memory.free(rhs_reg);
                     }
                 }
                 StatementKind::Out(signal) => match signal.value {
@@ -73,7 +69,7 @@ impl Generator {
                     SignalValue::Var(ident) => {
                         if let Some(var) = self.symbols.get_mut(&ident) {
                             if let Some(sigid) = signal.id {
-                                let caster = self.registors.alloc().unwrap();
+                                let caster = self.memory.alloc().unwrap();
                                 let reg = match var.loc {
                                     VariableLocation::REG(r) => r,
                                     VariableLocation::STK(_) => todo!(),
@@ -82,7 +78,7 @@ impl Generator {
                                 self.asm.reg_item(caster, &1, &Some(sigid.format()));
                                 self.asm.mul::<_, String, _>(caster, None, reg);
 
-                                self.registors.free(reg);
+                                self.memory.free(reg);
                                 var.loc = VariableLocation::REG(caster);
                             }
                             self.asm.out_reg(self.outputs.out(), var.loc.into());
@@ -99,6 +95,7 @@ impl Generator {
             }
         }
 
+        log::debug!("{:#?}", self.memory.dead_marks());
         Ok(self.asm.finish())
     }
 
@@ -139,8 +136,13 @@ impl Generator {
                 match op {
                     UnarySign::Neg => {
                         if !loc.is_imm() {
-                            let dst = self.registors.alloc().unwrap();
-                            self.asm.mul(dst, Some(rhs), -1);
+                            let dst = self.memory.alloc().unwrap();
+                            if rhs == dst {
+                                self.asm.muli(dst, -1);
+                            } else {
+                                self.asm.mul(dst, Some(rhs), -1);
+                            }
+
                             self.free_unmapped(rhs);
                             rhs = dst;
                         }
@@ -162,7 +164,7 @@ impl Generator {
         match (lhs, rhs) {
             // X: R OP R
             (OperandLocation::REG(lhs), OperandLocation::REG(rhs)) => {
-                let dst = self.registors.alloc().unwrap();
+                let dst = self.memory.alloc().unwrap();
                 self.omit_op(op, dst, Some(lhs), rhs);
 
                 self.free_unmapped(lhs);
@@ -186,7 +188,7 @@ impl Generator {
 
             // X: R OP N
             (OperandLocation::REG(lhs), OperandLocation::IMM(n)) => {
-                let dst = self.registors.alloc().unwrap();
+                let dst = self.memory.alloc().unwrap();
                 self.omit_op(op, dst, Some(lhs), n);
                 self.free_unmapped(lhs);
                 self.free_unmapped(dst);
@@ -200,7 +202,7 @@ impl Generator {
                     return self.lower_op(OperandLocation::REG(rhs), OperandLocation::IMM(n), op);
                 }
 
-                let dst = self.registors.alloc().unwrap();
+                let dst = self.memory.alloc().unwrap();
                 self.omit_op(op, dst, Some(rhs), n);
                 self.free_unmapped(rhs);
 
@@ -228,7 +230,7 @@ impl Generator {
     fn free_unmapped(&mut self, r: Register) {
         let sym = self.symbols.get_by_register(&r);
         if sym.is_none() {
-            self.registors.free(r);
+            self.memory.free(r);
         }
     }
 
@@ -237,7 +239,7 @@ impl Generator {
             OperandLocation::REG(r) => r,
             OperandLocation::STK(_s) => todo!(),
             OperandLocation::IMM(n) => {
-                let r = self.registors.alloc().unwrap();
+                let r = self.memory.alloc().unwrap();
                 self.asm.mov(r, n);
                 r
             }
