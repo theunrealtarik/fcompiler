@@ -171,26 +171,26 @@ impl Default for StackAllocator {
 // locations
 
 #[derive(Debug, Clone, Copy, strum_macros::Display)]
-pub enum VariableLocation {
+pub enum Location {
     REG(Register),
     STK(StackSlot),
 }
 
 #[allow(clippy::from_over_into)]
-impl Into<Register> for VariableLocation {
+impl Into<Register> for Location {
     fn into(self) -> Register {
         match self {
-            VariableLocation::REG(r) => r,
-            VariableLocation::STK(s) => *s,
+            Location::REG(r) => r,
+            Location::STK(s) => *s,
         }
     }
 }
 
-impl VariableLocation {
+impl Location {
     pub fn as_register(&self) -> &Register {
         match self {
-            VariableLocation::REG(r) => r,
-            VariableLocation::STK(s) => s,
+            Location::REG(r) => r,
+            Location::STK(s) => s,
         }
     }
 }
@@ -202,27 +202,12 @@ pub enum OperandLocation {
     IMM(i32),
 }
 
-impl From<VariableLocation> for OperandLocation {
-    fn from(value: VariableLocation) -> Self {
+impl From<Location> for OperandLocation {
+    fn from(value: Location) -> Self {
         match value {
-            VariableLocation::REG(r) => OperandLocation::REG(r),
-            VariableLocation::STK(s) => OperandLocation::STK(s),
+            Location::REG(r) => OperandLocation::REG(r),
+            Location::STK(s) => OperandLocation::STK(s),
         }
-    }
-}
-
-// variable
-
-#[derive(Debug)]
-pub struct Variable {
-    pub name: String,
-    pub loc: VariableLocation,
-    pub signal: Option<crate::game::SignalId>,
-}
-
-impl Variable {
-    pub fn new(name: String, loc: VariableLocation, signal: Option<crate::game::SignalId>) -> Self {
-        Self { name, loc, signal }
     }
 }
 
@@ -290,11 +275,11 @@ impl MemoryManager {
 
     pub fn free(&mut self, reg: Register) {
         if *reg >= RegisterAllocator::MAX_REGISTERS {
-            return;
+            panic!("attempted to free a non-allocatable register {:?}", reg);
         }
 
         if !self.regs.is_used(reg) {
-            return;
+            panic!("double or invalid free of {:?}", reg);
         }
 
         self.marks.insert(reg, Mark::Dead);
@@ -343,3 +328,4 @@ impl Default for MemoryManager {
     }
 }
 
+//

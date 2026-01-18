@@ -76,16 +76,16 @@ pub enum Expression {
     Op {
         lhs: Box<Expression>,
         rhs: Box<Expression>,
-        op: Sign,
+        op: BinOp,
     },
     UnaryOp {
         expr: Box<Expression>,
-        op: UnarySign,
+        op: UnaryOp,
     },
 }
 
 #[derive(Debug, Clone, Copy, strum_macros::Display)]
-pub enum Sign {
+pub enum BinOp {
     #[strum(to_string = "add")]
     Add,
     #[strum(to_string = "sub")]
@@ -98,14 +98,14 @@ pub enum Sign {
     Mod,
 }
 
-impl Sign {
+impl BinOp {
     pub fn is_commutative(&self) -> bool {
         matches!(self, Self::Add | Self::Mul)
     }
 }
 
 #[derive(Debug, Clone, Copy, strum_macros::Display)]
-pub enum UnarySign {
+pub enum UnaryOp {
     Neg,
     Not,
 }

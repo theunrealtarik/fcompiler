@@ -1,6 +1,2 @@
-let x = true && false;
-let y = true || x;
-
-let z = x && y;
-
-let r = z || (1 + x);
+let x = 10;
+let y = (x + 2) + (x + 5);

@@ -1,18 +1,22 @@
+use super::ir::*;
 use super::mem::*;
+
+use crate::frontend::ast::*;
+
 use log::debug;
 
 #[derive(Debug)]
-pub struct Asm {
+pub struct AssemblyEmitter {
     code: String,
 }
 
-impl Default for Asm {
+impl Default for AssemblyEmitter {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Asm {
+impl AssemblyEmitter {
     pub fn new() -> Self {
         Self {
             code: String::from("clr\n"),
@@ -206,7 +210,136 @@ impl Asm {
     }
 
     pub fn finish(&self) -> &str {
-        debug!("ASM finalized ({} bytes)", self.code.len());
         &self.code
+    }
+}
+
+pub struct Assembler {
+    instr: Vec<Instruction>,
+    emitter: AssemblyEmitter,
+}
+
+impl Default for Assembler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Assembler {
+    pub fn new() -> Self {
+        Self {
+            instr: Vec::new(),
+            emitter: AssemblyEmitter::new(),
+        }
+    }
+
+    pub fn instructions(&self) -> &Vec<Instruction> {
+        &self.instr
+    }
+
+    /// MOV: dst = src
+    pub fn mov(&mut self, dst: Operand, src: Operand) {
+        let instr = Instruction::Mov { dst, src };
+        self.instr.push(instr);
+    }
+
+    /// ADD: dst = lhs + rhs
+    pub fn add(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
+        let instr = Instruction::BinOp {
+            dst,
+            lhs,
+            rhs,
+            op: BinOp::Add,
+        };
+        self.instr.push(instr);
+    }
+
+    /// SUB: dst = lhs - rhs
+    pub fn sub(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
+        let instr = Instruction::BinOp {
+            dst,
+            lhs,
+            rhs,
+            op: BinOp::Sub,
+        };
+        self.instr.push(instr);
+    }
+
+    /// MUL: dst = lhs * rhs
+    pub fn mul(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
+        let instr = Instruction::BinOp {
+            dst,
+            lhs,
+            rhs,
+            op: BinOp::Mul,
+        };
+        self.instr.push(instr);
+    }
+
+    /// DIV: dst = lhs / rhs
+    pub fn div(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
+        let instr = Instruction::BinOp {
+            dst,
+            lhs,
+            rhs,
+            op: BinOp::Div,
+        };
+        self.instr.push(instr);
+    }
+
+    /// MOD: dst = lhs % rhs
+    pub fn modu(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
+        let instr = Instruction::BinOp {
+            dst,
+            lhs,
+            rhs,
+            op: BinOp::Mod,
+        };
+        self.instr.push(instr);
+    }
+
+    /// Unary NOT: dst = !src
+    pub fn not(&mut self, dst: Operand, src: Operand) {
+        let instr = Instruction::UnaryOp {
+            dst,
+            src,
+            op: UnaryOp::Not,
+        };
+        self.instr.push(instr);
+    }
+
+    /// Unary NEG: dst = -src
+    pub fn neg(&mut self, dst: Operand, src: Operand) {
+        let instr = Instruction::UnaryOp {
+            dst,
+            src,
+            op: UnaryOp::Neg,
+        };
+        self.instr.push(instr);
+    }
+
+    /// Output instruction: send src to signal
+    pub fn out(&mut self, src: Operand, signal_id: Option<String>) {
+        let instr = Instruction::Out { src, signal_id };
+        self.instr.push(instr);
+    }
+
+    /// Move signal
+    pub fn mov_sig(&mut self, dst: Operand, src: Operand, signal_id: Option<String>) {
+        let instr = Instruction::MovSig {
+            dst,
+            src,
+            signal_id,
+        };
+        self.instr.push(instr);
+    }
+
+    /// Push a NOP
+    pub fn nop(&mut self) {
+        self.instr.push(Instruction::Nop);
+    }
+    pub fn finish(&mut self) -> &str {
+        debug!("Emittation ended ({} bytes)", self.emitter.code.len());
+        self.emitter.finish()
     }
 }

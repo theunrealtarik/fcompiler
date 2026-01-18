@@ -4,15 +4,16 @@ use super::asm::*;
 use super::mem::*;
 use super::symbol::*;
 
+use crate::backend::ir::Operand;
 use crate::error::*;
 use crate::frontend::ast::*;
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 #[allow(dead_code)]
 pub struct Generator {
-    symbols: SymbolTable,
-    asm: Asm,
     program: Program,
+    symbols: SymbolTable,
+    asm: Assembler,
     memory: MemoryManager,
     outputs: OutputManager,
 }
@@ -21,81 +22,82 @@ impl Generator {
     pub fn new(program: Program) -> Self {
         Self {
             program,
-            ..Default::default()
+            symbols: SymbolTable::new(),
+            asm: Assembler::new(),
+            memory: MemoryManager::new(),
+            outputs: OutputManager::default(),
         }
     }
 
     pub fn generate(&mut self) -> Result<&str, CompileError> {
         match self.handle_statements() {
-            Ok(asm) => Ok(asm),
+            Ok(_) => {
+                for instr in self.asm.instructions() {
+                    log::debug!("{:?}", instr);
+                }
+
+                Ok("")
+            }
             Err((kind, span)) => Err(CompileError::new(kind, Some(span))),
         }
     }
 
-    fn handle_statements(&mut self) -> Result<&str, (CompileErrorKind, Span)> {
+    fn handle_statements(&mut self) -> Result<(), (CompileErrorKind, Span)> {
         for stmt in self.program.clone() {
             match stmt.kind {
                 StatementKind::Declare { ident, sigid, expr } => {
-                    let rhs_reg = match self.proc_expr(&expr) {
-                        Ok(loc) => self.ensure_reg(loc),
-                        Err(kind) => return Err((kind, stmt.span)),
-                    };
+                    let reg = self.memory.alloc().map_err(|k| (k, stmt.span))?;
+                    let var = Symbol::new(ident, Location::REG(reg), sigid);
 
-                    let mut variable =
-                        Variable::new(ident.to_string(), VariableLocation::REG(rhs_reg), sigid);
+                    let dst = Operand::persistent();
+                    let opr = self
+                        .proc_expr(&expr, Some(dst))
+                        .map_err(|k| (k, stmt.span))?;
 
-                    if let Some(_) = self.symbols.get_by_register(&rhs_reg) {
-                        let lhs_reg = self.memory.alloc().map_err(|kind| (kind, stmt.span))?;
-                        variable.loc = VariableLocation::REG(lhs_reg);
-                        self.asm.mov(lhs_reg, rhs_reg);
+                    self.symbols.push(&SymbolId(dst.into()), var);
+
+                    if dst != opr {
+                        self.asm.mov(dst, opr);
                     }
-
-                    self.symbols.insert(ident.to_string(), variable);
                 }
                 StatementKind::Assign { ident, expr } => {
-                    let var = match self.symbols.get(&ident) {
-                        Some(v) => v,
+                    let (sid, _) = match self.symbols.lookup(&ident) {
+                        Some((sid, symb)) => (sid, symb),
                         None => {
                             return Err((
-                                CompileErrorKind::Semantic(SemanticError::UndefinedVariable(ident)),
+                                CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
+                                    ident.to_string(),
+                                )),
                                 stmt.span,
                             ));
                         }
                     };
 
-                    let lhs_reg = *var.loc.as_register();
-                    let rhs_loc = match self.proc_expr(&expr) {
-                        Ok(location) => location,
-                        Err(kind) => return Err((kind, stmt.span)),
-                    };
+                    let dst = Operand::Persistent(**sid);
+                    let opr = self.proc_expr(&expr, None).map_err(|k| (k, stmt.span))?;
 
-                    let rhs_reg = self.ensure_reg(rhs_loc);
-                    if rhs_reg != lhs_reg {
-                        self.asm.mov(lhs_reg, rhs_reg);
-                        self.memory.free(rhs_reg);
-                    }
+                    self.asm.mov(dst, opr);
                 }
                 StatementKind::Out(signal) => match signal.value {
                     SignalValue::Num(scalar) => {
                         let signal = signal.id.map(|s| s.format());
-                        self.asm.out_item(self.outputs.out(), &scalar, &signal);
+                        self.asm.out(Operand::Imm(scalar), signal);
                     }
                     SignalValue::Var(ident) => {
-                        if let Some(var) = self.symbols.get_mut(&ident) {
-                            if let Some(sigid) = signal.id {
-                                let caster = self.memory.alloc().unwrap();
-                                let reg = match var.loc {
-                                    VariableLocation::REG(r) => r,
-                                    VariableLocation::STK(_) => todo!(),
-                                };
+                        if let Some((sid, _)) = self.symbols.lookup(&ident) {
+                            let target = Operand::Persistent(**sid);
+                            let signal_id = signal.id.map(|s| s.format());
 
-                                self.asm.reg_item(caster, &1, &Some(sigid.format()));
-                                self.asm.mul::<_, String, _>(caster, None, reg);
+                            if signal.id.is_some() {
+                                let signal_id = signal_id.clone();
+                                let caster = Operand::temp();
 
-                                self.memory.free(reg);
-                                var.loc = VariableLocation::REG(caster);
+                                self.asm.mov_sig(caster, Operand::Imm(1), signal_id);
+                                self.asm.mul(caster, target, target);
+                                self.asm.mov(target, caster);
                             }
-                            self.asm.out_reg(self.outputs.out(), var.loc.into());
+
+                            self.asm.out(target, signal_id);
                         } else {
                             return Err((
                                 CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
@@ -109,61 +111,48 @@ impl Generator {
             }
         }
 
-        Ok(self.asm.finish())
+        Ok(())
     }
 
-    fn proc_expr(&mut self, expr: &Expression) -> Result<OperandLocation, CompileErrorKind> {
+    fn proc_expr(
+        &mut self,
+        expr: &Expression,
+        p_dst: Option<Operand>,
+    ) -> Result<Operand, CompileErrorKind> {
         match expr {
             Expression::Value(signal) => match &signal.value {
-                SignalValue::Num(n) => Ok(OperandLocation::IMM(*n)),
-                SignalValue::Var(r_ident) => {
-                    let var = match self.symbols.get(r_ident) {
-                        Some(v) => v,
-                        None => {
-                            return Err(CompileErrorKind::Semantic(
-                                SemanticError::UndefinedVariable(r_ident.clone()),
-                            ));
-                        }
-                    };
-
-                    Ok(var.loc.into())
-                }
+                SignalValue::Num(n) => Ok(Operand::immediate(*n)),
+                SignalValue::Var(r_ident) => match self.symbols.lookup(r_ident) {
+                    Some((sid, _)) => Ok(Operand::Persistent(**sid)),
+                    None => Err(CompileErrorKind::Semantic(
+                        SemanticError::UndefinedVariable(r_ident.to_string()),
+                    )),
+                },
             },
             Expression::Op { lhs, rhs, op } => {
                 let lhs = (lhs.deref()).clone();
                 let rhs = (rhs.deref()).clone();
 
-                let lhs_loc = self.proc_expr(&lhs)?;
-                let rhs_loc = self.proc_expr(&rhs)?;
+                let lhs_opr = self.proc_expr(&lhs, None)?;
+                let rhs_opr = self.proc_expr(&rhs, None)?;
 
-                self.lower_op(lhs_loc, rhs_loc, op)
+                let dst = p_dst.unwrap_or_else(Operand::temp);
+                self.lower_op(lhs_opr, rhs_opr, op, dst)
             }
             Expression::UnaryOp { expr, op } => match op {
-                UnarySign::Neg => {
-                    let loc = match self.proc_expr(expr)? {
-                        OperandLocation::IMM(n) => OperandLocation::IMM(-n),
-                        opr => opr,
-                    };
+                UnaryOp::Neg => {
+                    let dst = p_dst.unwrap_or(Operand::temp());
+                    let opr = self.proc_expr(expr, Some(dst))?;
 
-                    let rhs = self.ensure_reg(loc);
-                    if !loc.is_imm() {
-                        let dst = self.memory.alloc().unwrap();
-                        if rhs == dst {
-                            self.asm.muli(dst, -1);
-                        } else {
-                            self.asm.mul(dst, Some(rhs), -1);
-                        }
-
-                        self.free_unmapped(rhs);
-                    }
-
-                    return Ok(OperandLocation::REG(rhs));
+                    // self.asm.mul(dst, opr, Operand::Imm(-1));
+                    self.asm.neg(dst, opr);
+                    Ok(dst)
                 }
-                UnarySign::Not => {
-                    let loc = self.proc_expr(expr)?;
-                    let rhs = self.ensure_reg(loc);
-                    self.asm.not::<_, String>(rhs, None);
-                    return Ok(OperandLocation::REG(rhs));
+                UnaryOp::Not => {
+                    let dst = p_dst.unwrap_or(Operand::temp());
+                    let src = self.proc_expr(expr, Some(dst))?;
+                    self.asm.not(dst, src);
+                    Ok(dst)
                 }
             },
         }
@@ -171,92 +160,55 @@ impl Generator {
 
     fn lower_op(
         &mut self,
-        lhs: OperandLocation,
-        rhs: OperandLocation,
-        op: &Sign,
-    ) -> Result<OperandLocation, CompileErrorKind> {
+        lhs: Operand,
+        rhs: Operand,
+        op: &BinOp,
+        dst: Operand,
+    ) -> Result<Operand, CompileErrorKind> {
         match (lhs, rhs) {
-            // X: R OP R
-            (OperandLocation::REG(lhs), OperandLocation::REG(rhs)) => {
-                let dst = self.memory.alloc().unwrap();
-                self.omit_op(op, dst, Some(lhs), rhs);
-
-                self.free_unmapped(lhs);
-                self.free_unmapped(rhs);
-
-                Ok(OperandLocation::REG(dst))
-            }
-
             // X: N OP M
-            (OperandLocation::IMM(n), OperandLocation::IMM(m)) => {
+            (Operand::Imm(n), Operand::Imm(m)) => {
                 let r = match op {
-                    Sign::Add => n + m,
-                    Sign::Sub => n - m,
-                    Sign::Mul => n * m,
-                    Sign::Div => n / m,
-                    Sign::Mod => n % m,
+                    BinOp::Add => n + m,
+                    BinOp::Sub => n - m,
+                    BinOp::Mul => n * m,
+                    BinOp::Div => n / m,
+                    BinOp::Mod => n % m,
                 };
 
-                Ok(OperandLocation::IMM(r))
-            }
-
-            // X: R OP N
-            (OperandLocation::REG(lhs), OperandLocation::IMM(n)) => {
-                let dst = self.memory.alloc().unwrap();
-                self.omit_op(op, dst, Some(lhs), n);
-                self.free_unmapped(lhs);
-                Ok(OperandLocation::REG(dst))
+                Ok(Operand::Imm(r))
             }
 
             // X: N OP R
-            (OperandLocation::IMM(n), OperandLocation::REG(rhs)) => {
+            (Operand::Imm(n), Operand::Persistent(_) | Operand::Temp(_)) => {
                 if op.is_commutative() {
-                    return self.lower_op(OperandLocation::REG(rhs), OperandLocation::IMM(n), op);
+                    return self.lower_op(rhs, Operand::Imm(n), op, dst);
                 }
-
-                let dst = self.memory.alloc().unwrap();
-                self.omit_op(op, dst, Some(rhs), n);
-                self.free_unmapped(rhs);
-
-                Ok(OperandLocation::REG(dst))
+                self.proc_op(op, dst, Some(lhs), rhs);
+                Ok(dst)
             }
-            _ => unimplemented!("CASE NOT IMPLEMENTED"),
+
+            // X: R OP R
+            // X: R OP N
+            _ => {
+                self.proc_op(op, dst, Some(lhs), rhs);
+                Ok(dst)
+            }
         }
     }
 
-    fn omit_op<D, S, V>(&mut self, op: &Sign, dst: D, src: Option<S>, val: V)
-    where
-        D: std::fmt::Display + std::fmt::Debug,
-        S: std::fmt::Display + std::fmt::Debug,
-        V: std::fmt::Display + std::fmt::Debug,
-    {
+    fn proc_op(&mut self, op: &BinOp, dst: Operand, src: Option<Operand>, val: Operand) {
+        let src = match src {
+            Some(opr) => opr,
+            None => dst,
+        };
+
         match op {
-            Sign::Add => self.asm.add(dst, src, val),
-            Sign::Sub => self.asm.sub(dst, src, val),
-            Sign::Mul => self.asm.mul(dst, src, val),
-            Sign::Div => self.asm.div(dst, src, val),
-            Sign::Mod => self.asm.modu(dst, src, val),
-        }
-    }
-
-    fn free_unmapped(&mut self, r: Register) {
-        let sym = self.symbols.get_by_register(&r);
-        if sym.is_none() {
-            self.memory.free(r);
-        }
-    }
-
-    fn ensure_reg(&mut self, loc: OperandLocation) -> Register {
-        match loc {
-            OperandLocation::REG(r) => r,
-            OperandLocation::STK(_s) => todo!(),
-            OperandLocation::IMM(n) => {
-                let r = self.memory.alloc().unwrap();
-                if n > 0 {
-                    self.asm.mov(r, n);
-                }
-                r
-            }
+            BinOp::Add => self.asm.add(dst, src, val),
+            BinOp::Sub => self.asm.sub(dst, src, val),
+            BinOp::Mul => self.asm.mul(dst, src, val),
+            BinOp::Div => self.asm.div(dst, src, val),
+            BinOp::Mod => self.asm.modu(dst, src, val),
         }
     }
 }

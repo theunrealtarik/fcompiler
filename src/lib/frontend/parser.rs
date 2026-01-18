@@ -81,6 +81,13 @@ pub fn parse(src: &str) -> Result<Program, CompileError> {
                 ));
             };
 
+            if ident_slice == 4 && l_chunk.len() < ident_slice {
+                return Err(CompileError::new(
+                    CompileErrorKind::Parse(ParseError::UnexpectedPattern),
+                    Some(line_span),
+                ));
+            }
+
             let ident = &(l_chunk)[ident_slice..];
             let expr = &(r_chunk)[..r_chunk.len() - 1];
 
@@ -109,8 +116,8 @@ pub fn parse(src: &str) -> Result<Program, CompileError> {
                 Ok(t) => t,
                 Err(k) => return Err(CompileError::new(k, Some(line_span))),
             };
-
             let mut parser = Lexer::new(&tokens);
+
             let expr = match parser.parse_expression(0) {
                 Ok(e) => e,
                 Err(k) => return Err(CompileError::new(k, Some(line_span))),
@@ -336,13 +343,13 @@ impl<'a> Lexer<'a> {
             };
 
             let sign = match op_token {
-                Token::Plus => Sign::Add,
-                Token::Minus => Sign::Sub,
-                Token::Star => Sign::Mul,
-                Token::Slash => Sign::Div,
-                Token::Percent => Sign::Mod,
-                Token::AndAnd => Sign::Mul,
-                Token::OrOr => Sign::Add,
+                Token::Plus => BinOp::Add,
+                Token::Minus => BinOp::Sub,
+                Token::Star => BinOp::Mul,
+                Token::Slash => BinOp::Div,
+                Token::Percent => BinOp::Mod,
+                Token::AndAnd => BinOp::Mul,
+                Token::OrOr => BinOp::Add,
                 _ => break,
             };
 
@@ -380,7 +387,7 @@ impl<'a> Lexer<'a> {
                 match self.parse_expression(Token::Minus.precedence().unwrap() + 1) {
                     Ok(expr) => Ok(Expression::UnaryOp {
                         expr: Box::new(expr),
-                        op: UnarySign::Neg,
+                        op: UnaryOp::Neg,
                     }),
                     Err(k) => Err(k),
                 }
@@ -388,7 +395,7 @@ impl<'a> Lexer<'a> {
             Some(Token::Bang) => match self.parse_expression(Token::Bang.precedence().unwrap()) {
                 Ok(expr) => Ok(Expression::UnaryOp {
                     expr: Box::new(expr),
-                    op: UnarySign::Not,
+                    op: UnaryOp::Not,
                 }),
                 Err(k) => Err(k),
             },
