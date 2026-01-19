@@ -42,6 +42,7 @@ impl Assembler {
         let instr = self.instr.clone();
         let mut tmps = Self::count_temp(&instr);
 
+        self.code.push_str(&AssemblyFormatter::clr::<String>(None));
         for instr in instr.iter() {
             match instr {
                 Instruction::BinOp { dst, lhs, rhs, op } => {
