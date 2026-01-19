@@ -5,7 +5,7 @@ use std::io::Read;
 use lib::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    lib::utils::env();
+    lib::log::init();
 
     let args = Args::parse();
 

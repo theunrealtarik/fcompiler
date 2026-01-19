@@ -13,6 +13,8 @@ use super::symbol::*;
 use crate::error::*;
 use crate::frontend::ast::*;
 
+use crate::log;
+
 #[derive(Default)]
 pub struct Assembler {
     instr: Vec<Instruction>,
@@ -47,8 +49,8 @@ impl Assembler {
             let asm_line = match instr {
                 Instruction::BinOp { dst, lhs, rhs, op } => {
                     let dst = self.ensure_location(dst)?;
-                    let lhs = self.ensure_location(lhs).unwrap();
-                    let rhs = self.ensure_location(rhs).unwrap();
+                    let lhs = self.ensure_location(lhs)?;
+                    let rhs = self.ensure_location(rhs)?;
 
                     match (dst, lhs, rhs) {
                         (Resolved::Reg(dst), Resolved::Reg(lhs), Resolved::Reg(rhs)) => {
@@ -72,9 +74,12 @@ impl Assembler {
                     let dst = self.ensure_location(dst)?;
                     let src = self.ensure_location(src)?;
 
+                    let lhs = if dst == src { "-1" } else { &src.to_string() };
+                    let rhs = if dst == src { "" } else { "-1" };
+
                     match op {
                         UnaryOp::Not => AssemblyFormatter::not(dst, Some(src)),
-                        UnaryOp::Neg => AssemblyFormatter::neg(dst),
+                        UnaryOp::Neg => AssemblyFormatter::arith("mul", dst, lhs, rhs),
                     }
                 }
 
@@ -125,7 +130,7 @@ impl Assembler {
 
             self.code.push_str(&asm_line);
 
-            log::debug!("{:?}", instr);
+            log::asm!("{:?}", instr);
             for src in instr.sources() {
                 if let Operand::Temp(temp_id) = src
                     && let Some(count) = tmps.get_mut(temp_id)
@@ -135,19 +140,23 @@ impl Assembler {
                         && let Some(reg) = self.memory.temps.remove(temp_id)
                     {
                         self.memory.free(reg);
-                        log::warn!("Freed {:?} ) → {:?}", reg, temp_id);
+                        log::warn!("Freed {:?} → {:?}", reg, temp_id);
                     }
                 }
             }
         }
 
-        let mut clear_regs = String::new();
-        for dead_reg in self.memory.dead_marks() {
-            clear_regs.push_str(&format!("{} ", dead_reg));
-        }
+        let dead_marks = self.memory.dead_marks();
 
-        self.code
-            .push_str(&AssemblyFormatter::clr(Some(clear_regs)));
+        if !dead_marks.is_empty() {
+            let mut clear_regs = String::new();
+            for dead_reg in dead_marks {
+                clear_regs.push_str(&format!("{} ", dead_reg));
+            }
+
+            self.code
+                .push_str(&AssemblyFormatter::clr(Some(clear_regs)));
+        }
 
         Ok(&self.code)
     }
@@ -208,7 +217,9 @@ impl Assembler {
 
                     self.symbols.push(&SymbolId(dst.into()), var);
 
-                    self.mov(dst, opr);
+                    if dst != opr {
+                        self.mov(dst, opr);
+                    }
                 }
                 StatementKind::Assign { ident, expr } => {
                     let (sid, _) = match self.symbols.lookup(&ident) {
@@ -295,7 +306,12 @@ impl Assembler {
                     let dst = p_dst.unwrap_or(Operand::temp());
                     let opr = self.proc_expr(expr, Some(dst))?;
 
-                    self.neg(dst, opr);
+                    if let Operand::Imm(n) = opr {
+                        return Ok(Operand::Imm(-n));
+                    } else {
+                        self.neg(dst, opr);
+                    }
+
                     Ok(dst)
                 }
                 UnaryOp::Not => {
@@ -385,19 +401,17 @@ impl Assembler {
 impl Assembler {
     /// MOV: dst = src
     pub fn mov(&mut self, dst: Operand, src: Operand) {
-        let instr = Instruction::Mov { dst, src };
-        self.instr.push(instr);
+        self.instr.push(Instruction::Mov { dst, src });
     }
 
     /// ADD: dst = lhs + rhs
     pub fn add(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
-        let instr = Instruction::BinOp {
+        self.instr.push(Instruction::BinOp {
             dst,
             lhs,
             rhs,
             op: BinOp::Add,
-        };
-        self.instr.push(instr);
+        });
     }
 
     /// INC: dst += 1
@@ -412,82 +426,74 @@ impl Assembler {
 
     /// SUB: dst = lhs - rhs
     pub fn sub(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
-        let instr = Instruction::BinOp {
+        self.instr.push(Instruction::BinOp {
             dst,
             lhs,
             rhs,
             op: BinOp::Sub,
-        };
-        self.instr.push(instr);
+        });
     }
 
     /// MUL: dst = lhs * rhs
     pub fn mul(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
-        let instr = Instruction::BinOp {
+        self.instr.push(Instruction::BinOp {
             dst,
             lhs,
             rhs,
             op: BinOp::Mul,
-        };
-        self.instr.push(instr);
+        });
     }
 
     /// DIV: dst = lhs / rhs
     pub fn div(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
-        let instr = Instruction::BinOp {
+        self.instr.push(Instruction::BinOp {
             dst,
             lhs,
             rhs,
             op: BinOp::Div,
-        };
-        self.instr.push(instr);
+        });
     }
 
     /// MOD: dst = lhs % rhs
     pub fn modu(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
-        let instr = Instruction::BinOp {
+        self.instr.push(Instruction::BinOp {
             dst,
             lhs,
             rhs,
             op: BinOp::Mod,
-        };
-        self.instr.push(instr);
+        });
     }
 
     /// Unary NOT: dst = !src
     pub fn not(&mut self, dst: Operand, src: Operand) {
-        let instr = Instruction::UnaryOp {
+        self.instr.push(Instruction::UnaryOp {
             dst,
             src,
             op: UnaryOp::Not,
-        };
-        self.instr.push(instr);
+        });
     }
 
     /// Unary NEG: dst = -src
     pub fn neg(&mut self, dst: Operand, src: Operand) {
-        let instr = Instruction::UnaryOp {
+        self.instr.push(Instruction::UnaryOp {
             dst,
             src,
             op: UnaryOp::Neg,
-        };
-        self.instr.push(instr);
+        });
     }
 
     /// Output instruction: send src to signal
     pub fn out(&mut self, src: Operand, signal_id: Option<crate::game::SignalId>) {
-        let instr = Instruction::Out { src, signal_id };
-        self.instr.push(instr);
+        self.instr.push(Instruction::Out { src, signal_id });
     }
 
     /// Move signal
     pub fn mov_sig(&mut self, dst: Operand, src: Operand, signal_id: crate::game::SignalId) {
-        let instr = Instruction::MovSig {
+        self.instr.push(Instruction::MovSig {
             dst,
             src,
             signal_id,
-        };
-        self.instr.push(instr);
+        });
     }
 
     /// Push a NOP

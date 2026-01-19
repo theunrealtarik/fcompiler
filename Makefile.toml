@@ -26,7 +26,8 @@ command = "lua"
 args = ["./scripts/signals/main.lua"]
 
 [tasks.debug]
-env = { "RUST_LOG" = "lib", RUST_BACKTRACE = "1" }
+env = { "RUST_LOG" = "lib=trace,asm=trace", "RUST_BACKTRACE" = "1" }
+
 command = "cargo"
 args = ["run", "--", "./test/program.ffc"]
 

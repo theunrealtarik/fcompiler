@@ -11,7 +11,8 @@ path = "./src/lib/mod.rs"
 convert_case = "0.10.0"
 strum = "0.27.2"
 strum_macros = "0.27.2"
-log = "0.4"
-env_logger = "0.11"
 clap = { version = "4.5.37", features = ["color", "help", "usage", "derive"] }
 lazy_static = "1.5.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+colored = "3.1.1"

@@ -1,4 +1,3 @@
-use crate::error::*;
 use std::collections::HashMap;
 
 // channeling
@@ -29,20 +28,6 @@ impl std::ops::Deref for Register {
 impl std::fmt::Display for Register {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "r{}", self.0 + 1)
-    }
-}
-
-impl TryFrom<i32> for Register {
-    type Error = CompileErrorKind;
-
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        if value >= 0 && value < MAX_REGISTERS as i32 {
-            Ok(Register(value as u8))
-        } else {
-            Err(CompileErrorKind::Generation(
-                GeneratorError::InvalidRegister,
-            ))
-        }
     }
 }
 
@@ -212,7 +197,7 @@ impl Location {
     }
 }
 
-#[derive(Debug, strum_macros::EnumIs)]
+#[derive(PartialEq, Eq, Debug, strum_macros::EnumIs)]
 pub enum Resolved {
     Reg(Register),
     Imm(i32),

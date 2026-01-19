@@ -30,13 +30,6 @@ impl AssemblyFormatter {
         format!("dec {}\n", dst)
     }
 
-    pub fn neg<D>(dst: D) -> String
-    where
-        D: std::fmt::Display + std::fmt::Debug,
-    {
-        Self::arith("mul", dst, -1, "")
-    }
-
     pub fn not<D, S>(dst: D, src: Option<S>) -> String
     where
         D: std::fmt::Display + std::fmt::Debug,
