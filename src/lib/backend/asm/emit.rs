@@ -22,6 +22,14 @@ impl AssemblyFormatter {
         format!("{} {} {} {}\n", op, dst, lhs, rhs)
     }
 
+    pub fn inc<D: std::fmt::Display>(dst: D) -> String {
+        format!("inc {}\n", dst)
+    }
+
+    pub fn dec<D: std::fmt::Display>(dst: D) -> String {
+        format!("dec {}\n", dst)
+    }
+
     pub fn neg<D>(dst: D) -> String
     where
         D: std::fmt::Display + std::fmt::Debug,

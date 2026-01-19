@@ -1,5 +1,6 @@
 use lazy_static::lazy_static;
 use std::sync::Mutex;
+use std::vec;
 
 lazy_static! {
     static ref TEMP_ID_TRACK: Mutex<i32> = Mutex::new(0);
@@ -73,6 +74,14 @@ pub enum Instruction {
         op: UnaryOp,
     },
 
+    Inc {
+        dst: Operand,
+    },
+
+    Dec {
+        dst: Operand,
+    },
+
     Mov {
         dst: Operand,
         src: Operand,
@@ -97,6 +106,8 @@ impl Instruction {
         match self {
             Instruction::BinOp { lhs, rhs, .. } => vec![lhs, rhs],
             Instruction::UnaryOp { src, .. } => vec![src],
+            Instruction::Inc { .. } => vec![],
+            Instruction::Dec { .. } => vec![],
             Instruction::Mov { src, .. } => vec![src],
             Instruction::MovSig { src, .. } => vec![src],
             Instruction::Out { src, .. } => vec![src],

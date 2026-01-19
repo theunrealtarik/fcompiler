@@ -44,62 +44,53 @@ impl Assembler {
 
         self.code.push_str(&AssemblyFormatter::clr::<String>(None));
         for instr in instr.iter() {
-            match instr {
+            let asm_line = match instr {
                 Instruction::BinOp { dst, lhs, rhs, op } => {
-                    let dst = self.ensure_location(dst).unwrap();
+                    let dst = self.ensure_location(dst)?;
                     let lhs = self.ensure_location(lhs).unwrap();
                     let rhs = self.ensure_location(rhs).unwrap();
 
                     match (dst, lhs, rhs) {
-                        (Resolved::Reg(dst), Resolved::Reg(lhs), Resolved::Reg(rhs)) => self
-                            .code
-                            .push_str(&AssemblyFormatter::arith(&op.to_string(), dst, lhs, rhs)),
-
-                        (Resolved::Reg(dst), Resolved::Reg(r), Resolved::Imm(n)) => self
-                            .code
-                            .push_str(&AssemblyFormatter::arith(&op.to_string(), dst, r, n)),
-
+                        (Resolved::Reg(dst), Resolved::Reg(lhs), Resolved::Reg(rhs)) => {
+                            AssemblyFormatter::arith(&op.to_string(), dst, lhs, rhs)
+                        }
+                        (Resolved::Reg(dst), Resolved::Reg(r), Resolved::Imm(n)) => {
+                            AssemblyFormatter::arith(&op.to_string(), dst, r, n)
+                        }
                         (Resolved::Reg(dst), Resolved::Imm(n), Resolved::Reg(r)) => {
                             if op.is_commutative() {
-                                self.code.push_str(&AssemblyFormatter::arith(
-                                    &op.to_string(),
-                                    dst,
-                                    r,
-                                    n,
-                                ))
+                                AssemblyFormatter::arith(&op.to_string(), dst, r, n)
                             } else {
-                                self.code.push_str(&AssemblyFormatter::arith(
-                                    &op.to_string(),
-                                    dst,
-                                    n,
-                                    r,
-                                ))
+                                AssemblyFormatter::arith(&op.to_string(), dst, n, r)
                             }
                         }
                         _ => unreachable!(),
                     }
                 }
+
                 Instruction::UnaryOp { dst, src, op } => {
-                    let dst = self.ensure_location(dst).unwrap();
-                    let src = self.ensure_location(src).unwrap();
+                    let dst = self.ensure_location(dst)?;
+                    let src = self.ensure_location(src)?;
 
                     match op {
-                        UnaryOp::Not => self.code.push_str(&AssemblyFormatter::not(dst, Some(src))),
-                        UnaryOp::Neg => self.code.push_str(&AssemblyFormatter::neg(dst)),
+                        UnaryOp::Not => AssemblyFormatter::not(dst, Some(src)),
+                        UnaryOp::Neg => AssemblyFormatter::neg(dst),
                     }
                 }
+
                 Instruction::Mov { dst, src } => {
-                    let dst = self.ensure_location(dst).unwrap();
-                    let src = self.ensure_location(src).unwrap();
-                    self.code.push_str(&AssemblyFormatter::mov(dst, src))
+                    let dst = self.ensure_location(dst)?;
+                    let src = self.ensure_location(src)?;
+                    AssemblyFormatter::mov(dst, src)
                 }
+
                 Instruction::MovSig {
                     dst,
                     src,
                     signal_id,
                 } => {
-                    let dst = self.ensure_location(dst).unwrap();
-                    let src = self.ensure_location(src).unwrap();
+                    let dst = self.ensure_location(dst)?;
+                    let src = self.ensure_location(src)?;
 
                     if !src.is_imm() {
                         return Err(CompileError::new(
@@ -108,24 +99,31 @@ impl Assembler {
                         ));
                     }
 
-                    self.code.push_str(&AssemblyFormatter::mov(
-                        dst,
-                        format!("{}{}", src, signal_id.format()),
-                    ))
+                    AssemblyFormatter::mov(dst, format!("{}{}", src, signal_id.format()))
                 }
+
                 Instruction::Out { src, signal_id } => {
-                    let src = self.ensure_location(src).unwrap();
+                    let src = self.ensure_location(src)?;
                     let item = format!(
                         "{}{}",
                         src,
-                        signal_id.map(|s| s.format()).unwrap_or(String::new())
+                        signal_id.map(|s| s.format()).unwrap_or_default()
                     );
-
-                    self.code
-                        .push_str(&AssemblyFormatter::mov(self.outputs.out(), item))
+                    AssemblyFormatter::mov(self.outputs.out(), item)
                 }
-                Instruction::Nop => {}
-            }
+
+                Instruction::Nop => String::new(),
+                Instruction::Inc { dst } => {
+                    let dst = self.ensure_location(dst)?;
+                    AssemblyFormatter::inc(dst)
+                }
+                Instruction::Dec { dst } => {
+                    let dst = self.ensure_location(dst)?;
+                    AssemblyFormatter::dec(dst)
+                }
+            };
+
+            self.code.push_str(&asm_line);
 
             log::debug!("{:?}", instr);
             for src in instr.sources() {
@@ -154,19 +152,23 @@ impl Assembler {
         Ok(&self.code)
     }
 
-    fn ensure_location(&mut self, opr: &Operand) -> Result<Resolved, CompileErrorKind> {
+    fn ensure_location(&mut self, opr: &Operand) -> Result<Resolved, CompileError> {
         match opr {
             Operand::Persistent(symbol_id) => match self.symbols.get(symbol_id) {
                 Some(symbol) => Ok(Resolved::Reg(symbol.loc.into())),
-                None => Err(CompileErrorKind::Generation(
-                    GeneratorError::NonAddressableSymbol,
+                None => Err(CompileError::new(
+                    CompileErrorKind::Generation(GeneratorError::NonAddressableSymbol),
+                    None,
                 )),
             },
             Operand::Temp(temp_id) => {
                 let reg = match self.memory.temps.get(temp_id) {
                     Some(r) => *r,
                     None => {
-                        let reg = self.memory.alloc()?;
+                        let reg = self
+                            .memory
+                            .alloc()
+                            .map_err(|k| CompileError::new(k, None))?;
                         self.memory.temps.insert(*temp_id, reg);
                         log::warn!("Allocated {:?} → {:?}", reg, temp_id);
                         reg
@@ -206,9 +208,7 @@ impl Assembler {
 
                     self.symbols.push(&SymbolId(dst.into()), var);
 
-                    if dst != opr {
-                        self.mov(dst, opr);
-                    }
+                    self.mov(dst, opr);
                 }
                 StatementKind::Assign { ident, expr } => {
                     let (sid, _) = match self.symbols.lookup(&ident) {
@@ -224,9 +224,13 @@ impl Assembler {
                     };
 
                     let dst = Operand::Persistent(*sid);
-                    let opr = self.proc_expr(&expr, None).map_err(|k| (k, stmt.span))?;
+                    let opr = self
+                        .proc_expr(&expr, Some(dst))
+                        .map_err(|k| (k, stmt.span))?;
 
-                    self.mov(dst, opr);
+                    if opr != dst {
+                        self.mov(dst, opr);
+                    }
                 }
                 StatementKind::Out(signal) => match signal.value {
                     SignalValue::Num(scalar) => {
@@ -291,7 +295,6 @@ impl Assembler {
                     let dst = p_dst.unwrap_or(Operand::temp());
                     let opr = self.proc_expr(expr, Some(dst))?;
 
-                    // self.mul(dst, opr, Operand::Imm(-1));
                     self.neg(dst, opr);
                     Ok(dst)
                 }
@@ -351,14 +354,33 @@ impl Assembler {
         };
 
         match op {
-            BinOp::Add => self.add(dst, src, val),
-            BinOp::Sub => self.sub(dst, src, val),
+            BinOp::Add => {
+                if let Operand::Imm(n) = val
+                    && n == 1
+                    && (dst == src)
+                {
+                    self.inc(dst);
+                } else {
+                    self.add(dst, src, val);
+                }
+            }
+            BinOp::Sub => {
+                if let Operand::Imm(n) = val
+                    && n == 1
+                    && (dst == src)
+                {
+                    self.dec(dst);
+                } else {
+                    self.sub(dst, src, val);
+                }
+            }
             BinOp::Mul => self.mul(dst, src, val),
             BinOp::Div => self.div(dst, src, val),
             BinOp::Mod => self.modu(dst, src, val),
         }
     }
 }
+
 /// IR emitting helpers
 impl Assembler {
     /// MOV: dst = src
@@ -376,6 +398,16 @@ impl Assembler {
             op: BinOp::Add,
         };
         self.instr.push(instr);
+    }
+
+    /// INC: dst += 1
+    pub fn inc(&mut self, dst: Operand) {
+        self.instr.push(Instruction::Inc { dst })
+    }
+
+    /// DEC: dst -= 1
+    pub fn dec(&mut self, dst: Operand) {
+        self.instr.push(Instruction::Dec { dst })
     }
 
     /// SUB: dst = lhs - rhs
