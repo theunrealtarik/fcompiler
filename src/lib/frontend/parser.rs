@@ -8,157 +8,161 @@ use crate::game::SignalId;
 
 use crate::chstring;
 
-pub fn parse(src: &str) -> Result<Program, CompileError> {
-    use super::lexemes::*;
-    let mut stmts: Vec<StatementContext> = Vec::new();
+pub struct Parser;
 
-    for (idx, line) in src.lines().enumerate() {
-        let line = line.trim();
-        let line_span = Span::new(idx);
+impl Parser {
+    pub fn parse(src: &str) -> Result<Program, CompileError> {
+        use super::lexemes::*;
+        let mut stmts: Vec<StatementContext> = Vec::new();
 
-        if line.is_empty() || line.starts_with("//") {
-            continue;
-        }
+        for (idx, line) in src.lines().enumerate() {
+            let line = line.trim();
+            let line_span = Span::new(idx);
 
-        if !line.ends_with(CH_SEMICOLON) {
+            if line.is_empty() || line.starts_with("//") {
+                continue;
+            }
+
+            if !line.ends_with(CH_SEMICOLON) {
+                return Err(CompileError::new(
+                    CompileErrorKind::Parse(ParseError::MissingSemicolon),
+                    Some(line_span),
+                ));
+            }
+
+            if line.starts_with(&chstring!(KW_OUT, CH_LPARAN))
+                && line.ends_with(&chstring!(CH_RPARAN, CH_SEMICOLON))
+            {
+                let inner = &line[4..line.len() - 2].trim();
+
+                let (ident, signal_type) = inner
+                    .split_once(CH_COMMA)
+                    .map(|(n, t)| (n.trim(), SignalId::from_str(t.trim()).ok()))
+                    .unwrap_or_else(|| (inner, None));
+
+                let mut signal = Signal::default();
+                match ident.parse::<i32>() {
+                    Ok(num) => {
+                        if signal_type.is_none() {
+                            return Err(CompileError::new(
+                                CompileErrorKind::Parse(ParseError::MissingSignalType),
+                                Some(line_span),
+                            ));
+                        }
+
+                        signal = Signal::from(num);
+                    }
+                    Err(_) => {
+                        if validate_identifier(ident) {
+                            signal.value = SignalValue::Var(ident.to_string());
+                        } else {
+                            return Err(CompileError::new(
+                                CompileErrorKind::Parse(ParseError::InvalidIdentifier),
+                                Some(line_span),
+                            ));
+                        }
+                    }
+                }
+
+                signal.id = signal_type;
+                stmts.push(StatementContext::new(StatementKind::Out(signal), line_span));
+                continue;
+            }
+
+            if let Some((l_chunk, r_chunk)) = line.split_once("=") {
+                let l_chunk = l_chunk.trim();
+                let r_chunk = r_chunk.trim();
+
+                let ident_slice = if l_chunk.starts_with("let") {
+                    4
+                } else if !l_chunk.contains(" ") {
+                    0
+                } else {
+                    return Err(CompileError::new(
+                        CompileErrorKind::Parse(ParseError::UnexpectedPattern),
+                        Some(line_span),
+                    ));
+                };
+
+                if ident_slice == 4 && l_chunk.len() < ident_slice {
+                    return Err(CompileError::new(
+                        CompileErrorKind::Parse(ParseError::UnexpectedPattern),
+                        Some(line_span),
+                    ));
+                }
+
+                let ident = &(l_chunk)[ident_slice..];
+                let expr = &(r_chunk)[..r_chunk.len() - 1];
+
+                let (ident, signal_id) = ident
+                    .split_once(CH_COLON)
+                    .map(|(n, t)| (n.trim(), SignalId::from_str(t.trim()).ok()))
+                    .unwrap_or_else(|| (ident.trim(), None));
+
+                if RESERVED_KEYWORDS.contains(&ident) {
+                    return Err(CompileError::new(
+                        CompileErrorKind::Parse(ParseError::ReservedKeyword {
+                            keyword: ident.to_string(),
+                        }),
+                        Some(line_span),
+                    ));
+                }
+
+                if !validate_identifier(ident) {
+                    return Err(CompileError::new(
+                        CompileErrorKind::Parse(ParseError::InvalidIdentifier),
+                        Some(line_span),
+                    ));
+                }
+
+                let tokens = match Token::tokenize(expr) {
+                    Ok(t) => t,
+                    Err(k) => return Err(CompileError::new(k, Some(line_span))),
+                };
+                let mut parser = Lexer::new(&tokens);
+
+                let expr = match parser.parse_expression(0) {
+                    Ok(e) => e,
+                    Err(k) => return Err(CompileError::new(k, Some(line_span))),
+                };
+
+                if !parser.is_eof() {
+                    return Err(CompileError::new(
+                        CompileErrorKind::Lex(LexerError::UnexpectedEndOfInput),
+                        Some(line_span),
+                    ));
+                }
+
+                if l_chunk.starts_with(KW_LET) {
+                    stmts.push(StatementContext::new(
+                        StatementKind::Declare {
+                            ident: String::from(ident),
+                            sigid: signal_id,
+                            expr,
+                        },
+                        line_span,
+                    ));
+                } else {
+                    stmts.push(StatementContext::new(
+                        StatementKind::Assign {
+                            ident: String::from(ident),
+                            expr,
+                        },
+                        line_span,
+                    ))
+                }
+
+                continue;
+            }
+
             return Err(CompileError::new(
-                CompileErrorKind::Parse(ParseError::MissingSemicolon),
+                CompileErrorKind::Parse(ParseError::UnexpectedPattern),
                 Some(line_span),
             ));
         }
 
-        if line.starts_with(&chstring!(KW_OUT, CH_LPARAN))
-            && line.ends_with(&chstring!(CH_RPARAN, CH_SEMICOLON))
-        {
-            let inner = &line[4..line.len() - 2].trim();
-
-            let (ident, signal_type) = inner
-                .split_once(CH_COMMA)
-                .map(|(n, t)| (n.trim(), SignalId::from_str(t.trim()).ok()))
-                .unwrap_or_else(|| (inner, None));
-
-            let mut signal = Signal::default();
-            match ident.parse::<i32>() {
-                Ok(num) => {
-                    if signal_type.is_none() {
-                        return Err(CompileError::new(
-                            CompileErrorKind::Parse(ParseError::MissingSignalType),
-                            Some(line_span),
-                        ));
-                    }
-
-                    signal = Signal::from(num);
-                }
-                Err(_) => {
-                    if validate_identifier(ident) {
-                        signal.value = SignalValue::Var(ident.to_string());
-                    } else {
-                        return Err(CompileError::new(
-                            CompileErrorKind::Parse(ParseError::InvalidIdentifier),
-                            Some(line_span),
-                        ));
-                    }
-                }
-            }
-
-            signal.id = signal_type;
-            stmts.push(StatementContext::new(StatementKind::Out(signal), line_span));
-            continue;
-        }
-
-        if let Some((l_chunk, r_chunk)) = line.split_once("=") {
-            let l_chunk = l_chunk.trim();
-            let r_chunk = r_chunk.trim();
-
-            let ident_slice = if l_chunk.starts_with("let") {
-                4
-            } else if !l_chunk.contains(" ") {
-                0
-            } else {
-                return Err(CompileError::new(
-                    CompileErrorKind::Parse(ParseError::UnexpectedPattern),
-                    Some(line_span),
-                ));
-            };
-
-            if ident_slice == 4 && l_chunk.len() < ident_slice {
-                return Err(CompileError::new(
-                    CompileErrorKind::Parse(ParseError::UnexpectedPattern),
-                    Some(line_span),
-                ));
-            }
-
-            let ident = &(l_chunk)[ident_slice..];
-            let expr = &(r_chunk)[..r_chunk.len() - 1];
-
-            let (ident, signal_id) = ident
-                .split_once(CH_COLON)
-                .map(|(n, t)| (n.trim(), SignalId::from_str(t.trim()).ok()))
-                .unwrap_or_else(|| (ident.trim(), None));
-
-            if RESERVED_KEYWORDS.contains(&ident) {
-                return Err(CompileError::new(
-                    CompileErrorKind::Parse(ParseError::ReservedKeyword {
-                        keyword: ident.to_string(),
-                    }),
-                    Some(line_span),
-                ));
-            }
-
-            if !validate_identifier(ident) {
-                return Err(CompileError::new(
-                    CompileErrorKind::Parse(ParseError::InvalidIdentifier),
-                    Some(line_span),
-                ));
-            }
-
-            let tokens = match Token::tokenize(expr) {
-                Ok(t) => t,
-                Err(k) => return Err(CompileError::new(k, Some(line_span))),
-            };
-            let mut parser = Lexer::new(&tokens);
-
-            let expr = match parser.parse_expression(0) {
-                Ok(e) => e,
-                Err(k) => return Err(CompileError::new(k, Some(line_span))),
-            };
-
-            if !parser.is_eof() {
-                return Err(CompileError::new(
-                    CompileErrorKind::Lex(LexerError::UnexpectedEndOfInput),
-                    Some(line_span),
-                ));
-            }
-
-            if l_chunk.starts_with(KW_LET) {
-                stmts.push(StatementContext::new(
-                    StatementKind::Declare {
-                        ident: String::from(ident),
-                        sigid: signal_id,
-                        expr,
-                    },
-                    line_span,
-                ));
-            } else {
-                stmts.push(StatementContext::new(
-                    StatementKind::Assign {
-                        ident: String::from(ident),
-                        expr,
-                    },
-                    line_span,
-                ))
-            }
-
-            continue;
-        }
-
-        return Err(CompileError::new(
-            CompileErrorKind::Parse(ParseError::UnexpectedPattern),
-            Some(line_span),
-        ));
+        Ok(Program::from(stmts))
     }
-
-    Ok(Program::from(stmts))
 }
 
 fn validate_identifier(s: &str) -> bool {

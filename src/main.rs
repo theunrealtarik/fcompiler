@@ -1,8 +1,8 @@
-use clap::Parser;
-use lib::backend::codegen::Generator;
-use lib::frontend::parser;
+use clap::Parser as ClipParser;
 use std::fs::File;
 use std::io::Read;
+
+use lib::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     lib::utils::env();
@@ -13,16 +13,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut src = String::new();
     file.read_to_string(&mut src)?;
 
-    let mut generator = Generator::new(parser::parse(&src).unwrap_or_else(|err| {
+    let mut assembler = Assembler::new(Parser::parse(&src).unwrap_or_else(|err| {
         eprintln!("{}", err);
         std::process::exit(1);
     }));
 
-    match generator.generate() {
-        Ok(code) => println!("{}", code),
+    match assembler.finish() {
+        Ok(code) => {
+            println!("{}", code);
+        }
         Err(err) => {
             eprintln!("{}", err);
-            std::process::exit(1);
         }
     }
     Ok(())

@@ -59,7 +59,7 @@ impl SymbolTable {
     pub fn get_by_register(&self, reg: &crate::backend::mem::Register) -> Option<&Symbol> {
         self.iter()
             .find(|(_, var)| match var.loc {
-                crate::backend::mem::Location::REG(r) => r == *reg,
+                crate::backend::mem::Location::Reg(r) => r == *reg,
                 _ => false,
             })
             .map(|(_, v)| v)

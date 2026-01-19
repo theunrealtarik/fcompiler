@@ -80,8 +80,10 @@ pub enum GeneratorError {
     OutOfRegisters,
     RegisterDoubleFree(u8),
     RegisterNotAllocated(u8),
+    RegisterCannotBeTyped,
     InvalidRegister,
     NonAddressableLocation,
+    NonAddressableSymbol,
 }
 
 impl fmt::Display for GeneratorError {
@@ -95,8 +97,10 @@ impl fmt::Display for GeneratorError {
             GeneratorError::RegisterNotAllocated(reg) => {
                 write!(f, "register r{} was not allocated.", reg)
             }
+            GeneratorError::RegisterCannotBeTyped => write!(f, "register cannot be typed."),
             GeneratorError::InvalidRegister => write!(f, "invalid register."),
             GeneratorError::NonAddressableLocation => write!(f, "non-addressable location."),
+            GeneratorError::NonAddressableSymbol => write!(f, "non-addressable symbol."),
         }
     }
 }

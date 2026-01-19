@@ -1,3 +1,6 @@
+use crate::error::*;
+use std::collections::HashMap;
+
 // channeling
 
 pub enum MemoryChannel {
@@ -8,6 +11,8 @@ pub enum MemoryChannel {
 }
 
 // cpu registers
+
+pub const MAX_REGISTERS: u8 = 63;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -27,6 +32,20 @@ impl std::fmt::Display for Register {
     }
 }
 
+impl TryFrom<i32> for Register {
+    type Error = CompileErrorKind;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        if value >= 0 && value < MAX_REGISTERS as i32 {
+            Ok(Register(value as u8))
+        } else {
+            Err(CompileErrorKind::Generation(
+                GeneratorError::InvalidRegister,
+            ))
+        }
+    }
+}
+
 // register allocator
 
 #[derive(Debug)]
@@ -41,8 +60,6 @@ impl Default for RegisterAllocator {
 }
 
 impl RegisterAllocator {
-    pub const MAX_REGISTERS: u8 = 63;
-
     pub fn new() -> Self {
         Self { free: u64::MAX }
     }
@@ -63,7 +80,7 @@ impl RegisterAllocator {
     pub fn occupied(&self) -> Vec<Register> {
         let mut occupied = Vec::new();
 
-        for b in 0..Self::MAX_REGISTERS {
+        for b in 0..MAX_REGISTERS {
             if self.free & (1 << b) == 0 {
                 occupied.push(Register(b));
             }
@@ -93,7 +110,7 @@ impl TryFrom<u8> for Register {
     type Error = crate::error::CompileError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
-        if value > RegisterAllocator::MAX_REGISTERS {
+        if value > MAX_REGISTERS {
             return Err(crate::error::CompileError::new(
                 crate::error::CompileErrorKind::Generation(
                     crate::error::GeneratorError::InvalidRegister,
@@ -172,16 +189,16 @@ impl Default for StackAllocator {
 
 #[derive(Debug, Clone, Copy, strum_macros::Display)]
 pub enum Location {
-    REG(Register),
-    STK(StackSlot),
+    Reg(Register),
+    Stk(StackSlot),
 }
 
 #[allow(clippy::from_over_into)]
 impl Into<Register> for Location {
     fn into(self) -> Register {
         match self {
-            Location::REG(r) => r,
-            Location::STK(s) => *s,
+            Location::Reg(r) => r,
+            Location::Stk(s) => *s,
         }
     }
 }
@@ -189,24 +206,23 @@ impl Into<Register> for Location {
 impl Location {
     pub fn as_register(&self) -> &Register {
         match self {
-            Location::REG(r) => r,
-            Location::STK(s) => s,
+            Location::Reg(r) => r,
+            Location::Stk(s) => s,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, strum_macros::Display, strum_macros::EnumIs)]
-pub enum OperandLocation {
-    REG(Register),
-    STK(StackSlot),
-    IMM(i32),
+#[derive(Debug, strum_macros::EnumIs)]
+pub enum Resolved {
+    Reg(Register),
+    Imm(i32),
 }
 
-impl From<Location> for OperandLocation {
-    fn from(value: Location) -> Self {
-        match value {
-            Location::REG(r) => OperandLocation::REG(r),
-            Location::STK(s) => OperandLocation::STK(s),
+impl std::fmt::Display for Resolved {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Resolved::Reg(r) => write!(f, "{}", r),
+            Resolved::Imm(n) => write!(f, "{}", n),
         }
     }
 }
@@ -249,7 +265,6 @@ impl OutputManager {
 }
 
 // memory manager
-use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Mark {
@@ -257,9 +272,10 @@ pub enum Mark {
     Dead,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct MemoryManager {
     marks: HashMap<Register, Mark>,
+    pub temps: HashMap<super::asm::TempId, Register>,
     pub regs: RegisterAllocator,
     pub stack: StackAllocator,
 }
@@ -267,14 +283,12 @@ pub struct MemoryManager {
 impl MemoryManager {
     pub fn new() -> Self {
         Self {
-            marks: HashMap::new(),
-            regs: RegisterAllocator::new(),
-            stack: StackAllocator::new(),
+            ..Default::default()
         }
     }
 
     pub fn free(&mut self, reg: Register) {
-        if *reg >= RegisterAllocator::MAX_REGISTERS {
+        if *reg >= MAX_REGISTERS {
             panic!("attempted to free a non-allocatable register {:?}", reg);
         }
 
@@ -285,7 +299,6 @@ impl MemoryManager {
         self.marks.insert(reg, Mark::Dead);
         unsafe {
             self.regs.free(reg);
-            log::debug!("free( {:?} )", reg);
         }
     }
 
@@ -321,11 +334,3 @@ impl MemoryManager {
             .collect::<Vec<Register>>()
     }
 }
-
-impl Default for MemoryManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-//
