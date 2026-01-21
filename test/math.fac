@@ -1,0 +1,8 @@
+let a = 3;
+let b = 7;
+let c = 2;
+
+let x = (a + b) * (c - a);
+let y = -(x + 5) * (b - c) / (a + 1);
+let z = y + x * -(b + c) + 42;
+let w = (z - y) * (x + a) / -(c + 1);

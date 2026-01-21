@@ -20,7 +20,7 @@ pub struct Assembler {
     instr: Vec<Instruction>,
     code: String,
     program: Program,
-    symbols: SymbolTable,
+    scopes: ScopeStack,
     memory: MemoryManager,
     outputs: OutputManager,
 }
@@ -204,6 +204,10 @@ impl Assembler {
     }
 
     fn handle_statements(&mut self) -> Result<(), (CompileErrorKind, Span)> {
+        let current = self.scopes.enter_scope();
+        let current = current.borrow();
+        let mut table = current.table.borrow_mut();
+
         for stmt in self.program.clone() {
             match stmt.kind {
                 StatementKind::Declare { ident, sigid, expr } => {
@@ -215,15 +219,15 @@ impl Assembler {
                         .proc_expr(&expr, Some(dst))
                         .map_err(|k| (k, stmt.span))?;
 
-                    self.symbols.push(&SymbolId(dst.into()), var);
+                    table.insert(SymbolId(dst.into()), var);
 
                     if dst != opr {
                         self.mov(dst, opr);
                     }
                 }
                 StatementKind::Assign { ident, expr } => {
-                    let (sid, _) = match self.symbols.lookup(&ident) {
-                        Some((sid, symb)) => (sid, symb),
+                    let sid = match table.lookup_name(&ident) {
+                        Some(SymbolHandle { sid, .. }) => sid,
                         None => {
                             return Err((
                                 CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
@@ -234,7 +238,7 @@ impl Assembler {
                         }
                     };
 
-                    let dst = Operand::Persistent(*sid);
+                    let dst = Operand::Persistent(sid);
                     let opr = self
                         .proc_expr(&expr, Some(dst))
                         .map_err(|k| (k, stmt.span))?;
@@ -248,8 +252,8 @@ impl Assembler {
                         self.out(Operand::Imm(scalar), signal.id);
                     }
                     SignalValue::Var(ident) => {
-                        if let Some((sid, _)) = self.symbols.lookup(&ident) {
-                            let target = Operand::Persistent(*sid);
+                        if let Some(SymbolHandle { sid, .. }) = table.lookup_name(&ident) {
+                            let target = Operand::Persistent(sid);
 
                             if let Some(signal_id) = signal.id {
                                 let caster = Operand::temp();
@@ -270,9 +274,12 @@ impl Assembler {
                         }
                     }
                 },
+                StatementKind::Block { .. } => todo!(),
+                StatementKind::If { .. } => todo!(),
             }
         }
 
+        self.scopes.leave_scope();
         Ok(())
     }
 
@@ -284,8 +291,8 @@ impl Assembler {
         match expr {
             Expression::Value(signal) => match &signal.value {
                 SignalValue::Num(n) => Ok(Operand::immediate(*n)),
-                SignalValue::Var(r_ident) => match self.symbols.lookup(r_ident) {
-                    Some((sid, _)) => Ok(Operand::Persistent(*sid)),
+                SignalValue::Var(r_ident) => match self.scopes.lookup_name(r_ident) {
+                    Some(SymbolHandle { sid, .. }) => Ok(Operand::Persistent(sid)),
                     None => Err(CompileErrorKind::Semantic(
                         SemanticError::UndefinedVariable(r_ident.to_string()),
                     )),

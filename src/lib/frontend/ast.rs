@@ -1,5 +1,7 @@
 use crate::error::*;
 
+/// Meta
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Span {
     pub line: usize,
@@ -11,8 +13,36 @@ impl Span {
     }
 }
 
+pub trait IntoOptSpan {
+    fn into_opt_span(self) -> Option<Span>;
+}
+
+impl IntoOptSpan for Span {
+    fn into_opt_span(self) -> Option<Span> {
+        Some(self)
+    }
+}
+
+impl IntoOptSpan for Option<Span> {
+    fn into_opt_span(self) -> Option<Span> {
+        self
+    }
+}
+
+/// Statements
+
+pub type Block = Vec<StatementContext>;
+
 #[derive(Debug, Clone)]
 pub enum StatementKind {
+    Block {
+        body: Block,
+    },
+    If {
+        cond: Expression,
+        then: Box<StatementKind>,
+        r#else: Box<StatementKind>,
+    },
     Declare {
         ident: String,
         sigid: Option<crate::game::SignalId>,
@@ -36,6 +66,8 @@ impl StatementContext {
         Self { kind, span }
     }
 }
+
+/// Program
 
 #[derive(Debug, Default, Clone)]
 pub struct Program(Vec<StatementContext>);
@@ -70,6 +102,8 @@ impl From<Vec<StatementContext>> for Program {
     }
 }
 
+/// Expression
+
 #[derive(Debug, Clone)]
 pub enum Expression {
     Value(Signal),
@@ -83,6 +117,8 @@ pub enum Expression {
         op: UnaryOp,
     },
 }
+
+/// Operations
 
 #[derive(Debug, Clone, Copy, strum_macros::Display)]
 pub enum BinOp {
@@ -108,6 +144,20 @@ impl BinOp {
 pub enum UnaryOp {
     Neg,
     Not,
+}
+
+/// Signals
+
+#[derive(Debug, Clone)]
+pub enum SignalValue {
+    Num(i32),
+    Var(String),
+}
+
+impl Default for SignalValue {
+    fn default() -> Self {
+        Self::Num(0)
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -151,17 +201,5 @@ impl From<String> for Signal {
             value: SignalValue::Var(v),
             id: None,
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum SignalValue {
-    Num(i32),
-    Var(String),
-}
-
-impl Default for SignalValue {
-    fn default() -> Self {
-        Self::Num(0)
     }
 }

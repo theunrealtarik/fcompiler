@@ -37,6 +37,8 @@ pub const CH_NL: char = '\n';
 
 pub const CH_LPARAN: char = '(';
 pub const CH_RPARAN: char = ')';
+pub const CH_LCURLY: char = '{';
+pub const CH_RCURLY: char = '}';
 
 pub const OPERATOR_CHARS: [char; 11] = [
     CH_ADD, CH_SUB, CH_MUL, CH_DIV, CH_MOD, CH_EQ, CH_LT, CH_GT, CH_NOT, CH_AND, CH_OR,

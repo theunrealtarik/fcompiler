@@ -1,4 +1,4 @@
-use crate::frontend::ast::Span;
+use crate::frontend::ast::*;
 use std::fmt;
 
 #[derive(Debug)]
@@ -6,6 +6,8 @@ pub enum ParseError {
     UnexpectedToken { found: String },
     UnexpectedPattern,
     UnexpectedVariant,
+    UnknownCharacter { found: String },
+    UnknownSignalId { found: String },
     UnexpectedEof,
     UnmatchedParenthesis,
     MissingSemicolon,
@@ -14,18 +16,40 @@ pub enum ParseError {
     ReservedKeyword { keyword: String },
 }
 
+pub fn maybe_span<T: IntoOptSpan>(s: T) -> Option<Span> {
+    s.into_opt_span()
+}
+
+#[macro_export]
+macro_rules! parse_err {
+    ($err:expr, $span:expr) => {
+        CompileError::new(
+            CompileErrorKind::Parse($err),
+            $crate::error::maybe_span($span),
+        )
+    };
+    ($err:expr, $span:expr) => {
+        CompileError::new(CompileErrorKind::Parse($err), Some($span))
+    };
+    ($err:expr) => {
+        CompileError::new(CompileErrorKind::Parse($err), None)
+    };
+}
+
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ParseError::UnexpectedToken { found } => write!(f, "unexpected token '{}'.", found),
-            ParseError::UnexpectedPattern => write!(f, "unexpected pattern."),
-            ParseError::UnexpectedVariant => write!(f, "unexpected variant."),
-            ParseError::UnexpectedEof => write!(f, "unexpected end of input."),
-            ParseError::UnmatchedParenthesis => write!(f, "unmatched parenthesis."),
-            ParseError::MissingSemicolon => write!(f, "missing semicolon."),
-            ParseError::MissingSignalType => write!(f, "missing signal type."),
-            ParseError::InvalidIdentifier => write!(f, "invalid identifier."),
-            ParseError::ReservedKeyword { keyword } => {
+            Self::UnexpectedToken { found } => write!(f, "unexpected token '{}'.", found),
+            Self::UnexpectedPattern => write!(f, "unexpected pattern."),
+            Self::UnexpectedVariant => write!(f, "unexpected variant."),
+            Self::UnexpectedEof => write!(f, "unexpected end of input."),
+            Self::UnknownSignalId { found } => write!(f, "unknown signal id: {}", found),
+            Self::UnknownCharacter { found } => write!(f, "unknown character '{}'.", found),
+            Self::UnmatchedParenthesis => write!(f, "unmatched parenthesis."),
+            Self::MissingSemicolon => write!(f, "missing semicolon."),
+            Self::MissingSignalType => write!(f, "missing signal type."),
+            Self::InvalidIdentifier => write!(f, "invalid identifier."),
+            Self::ReservedKeyword { keyword } => {
                 write!(f, "expected identifier, {} is a reserved keyword.", keyword)
             }
         }
@@ -40,13 +64,29 @@ pub enum LexerError {
     InvalidExpression(String),
 }
 
+#[macro_export]
+macro_rules! lex_err {
+    ($err:expr, $span:expr) => {
+        CompileError::new(
+            CompileErrorKind::Lex($err),
+            $crate::error::maybe_span($span),
+        )
+    };
+    ($err:expr, $span:expr) => {
+        CompileError::new(CompileErrorKind::Lex($err), Some($span))
+    };
+    ($err:expr) => {
+        CompileError::new(CompileErrorKind::Lex($err), None)
+    };
+}
+
 impl fmt::Display for LexerError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LexerError::UnmatchedParenthesis => write!(f, "unmatched parenthesis."),
-            LexerError::UnknownCharacter(c) => write!(f, "unknown character '{}'.", c),
-            LexerError::UnexpectedEndOfInput => write!(f, "unexpected end of input."),
-            LexerError::InvalidExpression(expr) => write!(f, "invalid expression: {}.", expr),
+            Self::UnmatchedParenthesis => write!(f, "unmatched parenthesis."),
+            Self::UnknownCharacter(c) => write!(f, "unknown character '{}'.", c),
+            Self::UnexpectedEndOfInput => write!(f, "unexpected end of input."),
+            Self::InvalidExpression(expr) => write!(f, "invalid expression: {}.", expr),
         }
     }
 }
@@ -59,17 +99,27 @@ pub enum SemanticError {
     InvalidAssignmentTarget,
 }
 
+#[macro_export]
+macro_rules! semantic_err {
+    ($err:expr, $span:expr) => {
+        CompileError::new(CompileErrorKind::Semantic($err), Some($span))
+    };
+    ($err:expr) => {
+        CompileError::new(CompileErrorKind::Semantic($err), None)
+    };
+}
+
 impl fmt::Display for SemanticError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SemanticError::UndefinedVariable(name) => write!(f, "undefined variable '{}'.", name),
-            SemanticError::DuplicateVariable(name) => write!(f, "duplicate variable '{}'.", name),
-            SemanticError::TypeMismatch { expected, found } => write!(
+            Self::UndefinedVariable(name) => write!(f, "undefined variable '{}'.", name),
+            Self::DuplicateVariable(name) => write!(f, "duplicate variable '{}'.", name),
+            Self::TypeMismatch { expected, found } => write!(
                 f,
                 "type mismatch - expected '{}', found '{}'.",
                 expected, found
             ),
-            SemanticError::InvalidAssignmentTarget => write!(f, "invalid assignment target."),
+            Self::InvalidAssignmentTarget => write!(f, "invalid assignment target."),
         }
     }
 }
@@ -86,21 +136,31 @@ pub enum GeneratorError {
     NonAddressableSymbol,
 }
 
+#[macro_export]
+macro_rules! gen_err {
+    ($err:expr, $span:expr) => {
+        CompileError::new(CompileErrorKind::Generation($err), Some($span))
+    };
+    ($err:expr) => {
+        CompileError::new(CompileErrorKind::Generation($err), None)
+    };
+}
+
 impl fmt::Display for GeneratorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            GeneratorError::UndefinedVariable(name) => write!(f, "undefined variable '{}'.", name),
-            GeneratorError::OutOfRegisters => write!(f, "out of registers."),
-            GeneratorError::RegisterDoubleFree(reg) => {
+            Self::UndefinedVariable(name) => write!(f, "undefined variable '{}'.", name),
+            Self::OutOfRegisters => write!(f, "out of registers."),
+            Self::RegisterDoubleFree(reg) => {
                 write!(f, "double free of register r{}.", reg)
             }
-            GeneratorError::RegisterNotAllocated(reg) => {
+            Self::RegisterNotAllocated(reg) => {
                 write!(f, "register r{} was not allocated.", reg)
             }
-            GeneratorError::RegisterCannotBeTyped => write!(f, "register cannot be typed."),
-            GeneratorError::InvalidRegister => write!(f, "invalid register."),
-            GeneratorError::NonAddressableLocation => write!(f, "non-addressable location."),
-            GeneratorError::NonAddressableSymbol => write!(f, "non-addressable symbol."),
+            Self::RegisterCannotBeTyped => write!(f, "register cannot be typed."),
+            Self::InvalidRegister => write!(f, "invalid register."),
+            Self::NonAddressableLocation => write!(f, "non-addressable location."),
+            Self::NonAddressableSymbol => write!(f, "non-addressable symbol."),
         }
     }
 }
@@ -119,12 +179,20 @@ impl CompileError {
 
 impl fmt::Display for CompileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use colored::Colorize;
         match &self.span {
-            Some(span) => write!(f, "(line: {}) {}", span.line + 1, self.kind),
+            Some(span) => write!(
+                f,
+                "{} {}",
+                format!("[line: {}]", span.line + 1).dimmed(),
+                self.kind
+            ),
             None => write!(f, "{}", self.kind),
         }
     }
 }
+
+impl std::error::Error for CompileError {}
 
 #[derive(Debug)]
 pub enum CompileErrorKind {
@@ -137,12 +205,15 @@ pub enum CompileErrorKind {
 impl fmt::Display for CompileErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CompileErrorKind::Lex(err) => write!(f, "Lexer error: {}", err),
-            CompileErrorKind::Parse(err) => write!(f, "Parser error: {}", err),
-            CompileErrorKind::Semantic(err) => write!(f, "Semantics error: {}", err),
-            CompileErrorKind::Generation(err) => write!(f, "Generation error: {}", err),
+            Self::Lex(err) => write!(f, "Lexer error: {}", err),
+            Self::Parse(err) => write!(f, "Parser error: {}", err),
+            Self::Semantic(err) => write!(f, "Semantics error: {}", err),
+            Self::Generation(err) => write!(f, "Generation error: {}", err),
         }
     }
 }
 
-impl std::error::Error for CompileError {}
+pub use crate::gen_err;
+pub use crate::lex_err;
+pub use crate::parse_err;
+pub use crate::semantic_err;

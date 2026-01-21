@@ -2,7 +2,8 @@ use clap::Parser as ClipParser;
 use std::fs::File;
 use std::io::Read;
 
-use lib::prelude::*;
+use lib::compiler::*;
+use lib::log;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     lib::log::init();
@@ -13,19 +14,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut src = String::new();
     file.read_to_string(&mut src)?;
 
-    let mut assembler = Assembler::new(Parser::parse(&src).unwrap_or_else(|err| {
-        eprintln!("{}", err);
-        std::process::exit(1);
-    }));
+    Compiler::compile(&src)?;
 
-    match assembler.finish() {
-        Ok(code) => {
-            println!("{}", code);
-        }
-        Err(err) => {
-            eprintln!("{}", err);
-        }
-    }
     Ok(())
 }
 

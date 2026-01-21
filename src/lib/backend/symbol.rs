@@ -1,19 +1,67 @@
-use std::collections::HashMap;
+use super::mem::Location;
+use crate::{backend::mem::Register, game::SignalId};
+
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
+#[derive(Debug, Default)]
+pub struct Scope {
+    pub table: RefCell<SymbolTable>,
+}
+
+pub type SharedScope = Rc<RefCell<Scope>>;
+
+#[derive(Debug, Default)]
+pub struct ScopeStack {
+    scopes: Vec<SharedScope>,
+}
+
+impl ScopeStack {
+    pub fn lookup_name(&self, name: &String) -> Option<SymbolHandle> {
+        for scope in self.scopes.iter().rev() {
+            let scope = scope.borrow();
+            let table = scope.table.borrow();
+            if let Some(sym_ref) = table.lookup_name(name)
+                && &sym_ref.sym.borrow().name == name
+            {
+                return Some(sym_ref);
+            }
+        }
+
+        None
+    }
+
+    pub fn enter_scope(&mut self) -> SharedScope {
+        self.scopes.push(Rc::new(RefCell::new(Scope::default())));
+        self.scopes.last().unwrap().clone()
+    }
+
+    pub fn leave_scope(&mut self) -> Option<SharedScope> {
+        self.scopes.pop()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SymbolHandle {
+    pub sid: SymbolId,
+    pub sym: SharedSymbol,
+}
 
 #[derive(Debug)]
 pub struct Symbol {
     pub name: String,
-    pub loc: super::mem::Location,
-    pub signal: Option<crate::game::SignalId>,
+    pub loc: Location,
+    // pub depth: usize,
+    pub signal: Option<SignalId>,
 }
 
 impl Symbol {
-    pub fn new(
-        name: String,
-        loc: super::mem::Location,
-        signal: Option<crate::game::SignalId>,
-    ) -> Self {
-        Self { name, loc, signal }
+    pub fn new(name: String, loc: Location, signal: Option<SignalId>) -> Self {
+        Self {
+            name,
+            loc,
+            signal,
+            // depth,
+        }
     }
 }
 
@@ -28,23 +76,17 @@ impl std::ops::Deref for SymbolId {
     }
 }
 
+type SharedSymbol = Rc<RefCell<Symbol>>;
+
 #[derive(Debug)]
 pub struct SymbolTable {
-    storage: HashMap<SymbolId, Symbol>,
+    storage: HashMap<SymbolId, SharedSymbol>,
     field: HashMap<String, SymbolId>,
 }
 
-impl std::ops::Deref for SymbolTable {
-    type Target = HashMap<SymbolId, Symbol>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.storage
-    }
-}
-
-impl std::ops::DerefMut for SymbolTable {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.storage
+impl Default for SymbolTable {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -56,29 +98,30 @@ impl SymbolTable {
         }
     }
 
-    pub fn get_by_register(&self, reg: &crate::backend::mem::Register) -> Option<&Symbol> {
-        self.iter()
-            .find(|(_, var)| match var.loc {
-                crate::backend::mem::Location::Reg(r) => r == *reg,
-                _ => false,
+    pub fn insert(&mut self, sid: SymbolId, sym: Symbol) {
+        let indent = sym.name.clone();
+        self.storage.insert(sid, Rc::new(RefCell::new(sym)));
+        self.field.insert(indent, sid);
+    }
+
+    pub fn lookup_register(&self, reg: &Register) -> Option<SharedSymbol> {
+        self.storage
+            .iter()
+            .find(|(_, sym)| {
+                let sym = sym.borrow();
+                match sym.loc {
+                    Location::Reg(r) => &r == reg,
+                    _ => false,
+                }
             })
-            .map(|(_, v)| v)
+            .map(|(_, sym)| Rc::clone(&sym))
     }
 
-    pub fn push(&mut self, sid: &SymbolId, symbol: Symbol) {
-        let indent = symbol.name.clone();
-        self.storage.insert(*sid, symbol);
-        self.field.insert(indent, *sid);
-    }
-
-    pub fn lookup(&self, name: &String) -> Option<(&SymbolId, &Symbol)> {
+    pub fn lookup_name(&self, name: &String) -> Option<SymbolHandle> {
         let sid = self.field.get(name)?;
-        self.storage.get(sid).map(|sym| (sid, sym))
-    }
-}
-
-impl Default for SymbolTable {
-    fn default() -> Self {
-        Self::new()
+        self.storage.get(sid).map(|sym| SymbolHandle {
+            sid: *sid,
+            sym: sym.clone(),
+        })
     }
 }

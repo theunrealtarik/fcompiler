@@ -4,9 +4,23 @@ pub mod frontend;
 pub mod error;
 pub mod game;
 
-pub mod prelude {
-    pub use crate::backend::asm::Assembler;
-    pub use crate::frontend::parser::Parser;
+pub mod compiler {
+    use crate::frontend::ast::Program;
+    use crate::frontend::parser::Parser;
+    use crate::log;
+
+    pub struct Compiler;
+
+    impl Compiler {
+        pub fn compile(src: &str) -> Result<(), crate::error::CompileError> {
+            let stmts = Parser::new(src)?.parse()?;
+            let program = Program::from(stmts);
+
+            log::debug!("{:#?}", program);
+            // Assembler::new(program);
+            Ok(())
+        }
+    }
 }
 
 pub mod utils {
