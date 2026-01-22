@@ -166,7 +166,10 @@ impl Assembler {
     fn ensure_location(&mut self, opr: &Operand) -> Result<Resolved, CompileError> {
         match opr {
             Operand::Persistent(symbol_id) => match self.scopes.birdeye().get(symbol_id) {
-                Some(symbol) => Ok(Resolved::Reg(symbol.borrow().loc.into())),
+                Some(sym) => {
+                    let sym = sym.borrow();
+                    Ok(Resolved::Reg(sym.loc.into()))
+                }
                 None => Err(CompileError::new(
                     CompileErrorKind::Generation(GeneratorError::NonAddressableSymbol),
                     None,
@@ -226,7 +229,13 @@ impl Assembler {
                     self.scopes.bind(SymbolId(dst.into()), var);
 
                     if dst != opr {
-                        self.mov(dst, opr);
+                        if let Some(signal_id) = sigid
+                            && opr.is_imm()
+                        {
+                            self.mov_sig(dst, opr, signal_id);
+                        } else {
+                            self.mov(dst, opr);
+                        }
                     }
                 }
                 StatementKind::Assign { ident, expr } => {
