@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match Compiler::compile(&src) {
         Ok(_) => {}
-        Err(err) => eprint!("{}", err),
+        Err(err) => eprintln!("{}", err),
     }
 
     Ok(())
