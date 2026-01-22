@@ -206,8 +206,8 @@ pub enum Resolved {
 impl std::fmt::Display for Resolved {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Resolved::Reg(r) => write!(f, "{}", r),
-            Resolved::Imm(n) => write!(f, "{}", n),
+            Self::Reg(r) => write!(f, "{}", r),
+            Self::Imm(n) => write!(f, "{}", n),
         }
     }
 }
