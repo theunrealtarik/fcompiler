@@ -5,7 +5,8 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 #[derive(Debug, Default)]
 pub struct Scope {
-    pub table: RefCell<SymbolTable>,
+    pub is_global: bool,
+    pub locals: RefCell<SymbolTable>,
 }
 
 pub type SharedScope = Rc<RefCell<Scope>>;
@@ -13,13 +14,14 @@ pub type SharedScope = Rc<RefCell<Scope>>;
 #[derive(Debug, Default)]
 pub struct ScopeStack {
     scopes: Vec<SharedScope>,
+    birdeye: HashMap<SymbolId, SharedSymbol>,
 }
 
 impl ScopeStack {
     pub fn lookup_name(&self, name: &String) -> Option<SymbolHandle> {
         for scope in self.scopes.iter().rev() {
             let scope = scope.borrow();
-            let table = scope.table.borrow();
+            let table = scope.locals.borrow();
             if let Some(sym_ref) = table.lookup_name(name)
                 && &sym_ref.sym.borrow().name == name
             {
@@ -30,13 +32,38 @@ impl ScopeStack {
         None
     }
 
+    pub fn birdeye(&self) -> &HashMap<SymbolId, SharedSymbol> {
+        &self.birdeye
+    }
+
     pub fn enter_scope(&mut self) -> SharedScope {
-        self.scopes.push(Rc::new(RefCell::new(Scope::default())));
+        let scope = Scope {
+            is_global: self.scopes.is_empty(),
+            ..Default::default()
+        };
+
+        self.scopes.push(Rc::new(RefCell::new(scope)));
         self.scopes.last().unwrap().clone()
     }
 
-    pub fn leave_scope(&mut self) -> Option<SharedScope> {
-        self.scopes.pop()
+    pub fn leave_scope<F>(&mut self, mut callop: F)
+    where
+        F: FnMut(Rc<RefCell<Scope>>),
+    {
+        if let Some(symbol) = self.scopes.pop() {
+            callop(symbol)
+        }
+    }
+
+    pub fn bind(&mut self, sid: SymbolId, sym: Symbol) {
+        if let Some(current) = self.scopes.last() {
+            let current = current.borrow();
+            let mut table = current.locals.borrow_mut();
+            let shared_symbol = Rc::new(RefCell::new(sym));
+
+            self.birdeye.insert(sid, Rc::clone(&shared_symbol));
+            table.bind(sid, Rc::clone(&shared_symbol));
+        }
     }
 }
 
@@ -78,15 +105,48 @@ impl std::ops::Deref for SymbolId {
 
 type SharedSymbol = Rc<RefCell<Symbol>>;
 
-#[derive(Debug)]
 pub struct SymbolTable {
     storage: HashMap<SymbolId, SharedSymbol>,
     field: HashMap<String, SymbolId>,
 }
 
+impl std::fmt::Debug for SymbolTable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug_struct = f.debug_struct("SymbolTable");
+        for (id, sym) in &self.storage {
+            let sym = sym.borrow();
+            debug_struct.field(
+                &format!("{} ({})", sym.name, id.0),
+                &format!(
+                    "{:?}{}",
+                    sym.loc,
+                    sym.signal
+                        .map(|s| format!(" [{}]", s))
+                        .unwrap_or(String::new())
+                ),
+            );
+        }
+        debug_struct.finish()
+    }
+}
+
 impl Default for SymbolTable {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl std::ops::Deref for SymbolTable {
+    type Target = HashMap<SymbolId, SharedSymbol>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.storage
+    }
+}
+
+impl std::ops::DerefMut for SymbolTable {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.storage
     }
 }
 
@@ -98,9 +158,9 @@ impl SymbolTable {
         }
     }
 
-    pub fn insert(&mut self, sid: SymbolId, sym: Symbol) {
-        let indent = sym.name.clone();
-        self.storage.insert(sid, Rc::new(RefCell::new(sym)));
+    pub fn bind(&mut self, sid: SymbolId, sym: SharedSymbol) {
+        let indent = sym.borrow().name.clone();
+        self.storage.insert(sid, sym);
         self.field.insert(indent, sid);
     }
 

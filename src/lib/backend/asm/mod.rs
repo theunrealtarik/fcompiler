@@ -37,9 +37,12 @@ impl Assembler {
         &self.instr
     }
 
+    pub fn code(&self) -> &String {
+        &self.code
+    }
+
     pub fn finish(&mut self) -> Result<&str, CompileError> {
-        self.handle_statements()
-            .map_err(|(k, span)| CompileError::new(k, Some(span)))?;
+        self.handle_statements(self.program.to_vec())?;
 
         let instr = self.instr.clone();
         let mut tmps = Self::count_temp(&instr);
@@ -147,7 +150,6 @@ impl Assembler {
         }
 
         let dead_marks = self.memory.dead_marks();
-
         if !dead_marks.is_empty() {
             let mut clear_regs = String::new();
             for dead_reg in dead_marks {
@@ -163,8 +165,8 @@ impl Assembler {
 
     fn ensure_location(&mut self, opr: &Operand) -> Result<Resolved, CompileError> {
         match opr {
-            Operand::Persistent(symbol_id) => match self.symbols.get(symbol_id) {
-                Some(symbol) => Ok(Resolved::Reg(symbol.loc.into())),
+            Operand::Persistent(symbol_id) => match self.scopes.birdeye().get(symbol_id) {
+                Some(symbol) => Ok(Resolved::Reg(symbol.borrow().loc.into())),
                 None => Err(CompileError::new(
                     CompileErrorKind::Generation(GeneratorError::NonAddressableSymbol),
                     None,
@@ -203,37 +205,39 @@ impl Assembler {
         map
     }
 
-    fn handle_statements(&mut self) -> Result<(), (CompileErrorKind, Span)> {
+    fn handle_statements(&mut self, stmts: Vec<StatementContext>) -> Result<(), CompileError> {
         let current = self.scopes.enter_scope();
         let current = current.borrow();
-        let mut table = current.table.borrow_mut();
 
-        for stmt in self.program.clone() {
+        for stmt in stmts {
             match stmt.kind {
                 StatementKind::Declare { ident, sigid, expr } => {
-                    let reg = self.memory.alloc().map_err(|k| (k, stmt.span))?;
+                    let reg = self
+                        .memory
+                        .alloc()
+                        .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
                     let var = Symbol::new(ident, Location::Reg(reg), sigid);
 
                     let dst = Operand::persistent();
                     let opr = self
                         .proc_expr(&expr, Some(dst))
-                        .map_err(|k| (k, stmt.span))?;
+                        .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
 
-                    table.insert(SymbolId(dst.into()), var);
+                    self.scopes.bind(SymbolId(dst.into()), var);
 
                     if dst != opr {
                         self.mov(dst, opr);
                     }
                 }
                 StatementKind::Assign { ident, expr } => {
-                    let sid = match table.lookup_name(&ident) {
+                    let sid = match current.locals.borrow().lookup_name(&ident) {
                         Some(SymbolHandle { sid, .. }) => sid,
                         None => {
-                            return Err((
+                            return Err(CompileError::new(
                                 CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
                                     ident.to_string(),
                                 )),
-                                stmt.span,
+                                Some(stmt.span),
                             ));
                         }
                     };
@@ -241,7 +245,7 @@ impl Assembler {
                     let dst = Operand::Persistent(sid);
                     let opr = self
                         .proc_expr(&expr, Some(dst))
-                        .map_err(|k| (k, stmt.span))?;
+                        .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
 
                     if opr != dst {
                         self.mov(dst, opr);
@@ -252,34 +256,47 @@ impl Assembler {
                         self.out(Operand::Imm(scalar), signal.id);
                     }
                     SignalValue::Var(ident) => {
-                        if let Some(SymbolHandle { sid, .. }) = table.lookup_name(&ident) {
+                        if let Some(SymbolHandle { sid, .. }) =
+                            current.locals.borrow().lookup_name(&ident)
+                        {
                             let target = Operand::Persistent(sid);
 
                             if let Some(signal_id) = signal.id {
-                                let caster = Operand::temp();
-
-                                self.mov_sig(caster, Operand::Imm(1), signal_id);
-                                self.mul(caster, target, target);
-                                self.mov(target, caster);
+                                self.cast(target, signal_id);
                             }
 
                             self.out(target, signal.id);
                         } else {
-                            return Err((
+                            return Err(CompileError::new(
                                 CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
                                     ident.clone(),
                                 )),
-                                stmt.span,
+                                Some(stmt.span),
                             ));
                         }
                     }
                 },
-                StatementKind::Block { .. } => todo!(),
                 StatementKind::If { .. } => todo!(),
+                StatementKind::Block { body } => self.handle_statements(body)?,
             }
         }
 
-        self.scopes.leave_scope();
+        self.scopes.leave_scope(|scope| {
+            let scope = scope.borrow();
+            let locals = scope.locals.borrow();
+
+            if scope.is_global {
+                return;
+            }
+
+            log::warn!(" {:#?}", locals);
+            for sym in locals.values() {
+                match sym.borrow().loc {
+                    Location::Reg(reg) => self.memory.free(reg),
+                    Location::Stk(_) => todo!(),
+                }
+            }
+        });
         Ok(())
     }
 
@@ -401,6 +418,13 @@ impl Assembler {
             BinOp::Div => self.div(dst, src, val),
             BinOp::Mod => self.modu(dst, src, val),
         }
+    }
+
+    fn cast(&mut self, target: Operand, signal_id: crate::game::SignalId) {
+        let caster = Operand::temp();
+        self.mov_sig(caster, Operand::Imm(1), signal_id);
+        self.mul(caster, target, target);
+        self.mov(target, caster);
     }
 }
 

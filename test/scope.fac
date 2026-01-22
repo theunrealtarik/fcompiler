@@ -1,5 +1,22 @@
-let x: IronPlate = 5;
+let a: IronPlate = 1;
+let b: CopperPlate = 2;
 
 {
-    let y = 10;
+    let a = a + 3;
+    let c = b + 5;
+    out(a);
+    out(c);
+
+    {
+        let b = a + c;
+        let d = b + 1;
+        out(b);
+        out(d);
+    }
+
+    let e = a + c;
+    out(e);
 }
+
+let f = a + b;
+out(f);

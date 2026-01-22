@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 mod signals;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, strum_macros::Display)]
 pub enum SignalId {
     Item(signals::Item),
     Fluid(signals::Fluid),

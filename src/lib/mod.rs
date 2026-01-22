@@ -5,9 +5,9 @@ pub mod error;
 pub mod game;
 
 pub mod compiler {
+    use crate::backend::asm::Assembler;
     use crate::frontend::ast::Program;
     use crate::frontend::parser::Parser;
-    use crate::log;
 
     pub struct Compiler;
 
@@ -15,9 +15,11 @@ pub mod compiler {
         pub fn compile(src: &str) -> Result<(), crate::error::CompileError> {
             let stmts = Parser::new(src)?.parse()?;
             let program = Program::from(stmts);
+            let mut assembler = Assembler::new(program);
 
-            log::debug!("{:#?}", program);
-            // Assembler::new(program);
+            assembler.finish()?;
+
+            println!("{}", assembler.code());
             Ok(())
         }
     }

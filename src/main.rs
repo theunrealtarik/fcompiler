@@ -3,7 +3,6 @@ use std::fs::File;
 use std::io::Read;
 
 use lib::compiler::*;
-use lib::log;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     lib::log::init();
@@ -14,7 +13,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut src = String::new();
     file.read_to_string(&mut src)?;
 
-    Compiler::compile(&src)?;
+    match Compiler::compile(&src) {
+        Ok(_) => {}
+        Err(err) => eprint!("{}", err),
+    }
 
     Ok(())
 }
