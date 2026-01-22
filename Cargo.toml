@@ -8,7 +8,6 @@ name = "lib"
 path = "./src/lib/mod.rs"
 
 [dependencies]
-convert_case = "0.10.0"
 strum = "0.27.2"
 strum_macros = "0.27.2"
 clap = { version = "4.5.37", features = ["color", "help", "usage", "derive"] }

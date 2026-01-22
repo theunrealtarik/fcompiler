@@ -1,9 +1,8 @@
-use convert_case::{Case, Casing};
 use std::str::FromStr;
 
 mod signals;
 
-#[derive(Debug, Clone, Copy, strum_macros::Display)]
+#[derive(Debug, Clone, Copy, strum_macros::Display, PartialEq, Eq)]
 pub enum SignalId {
     Item(signals::Item),
     Fluid(signals::Fluid),
@@ -34,7 +33,6 @@ impl SignalId {
             SignalId::Fluid(fluid) => fluid.to_string(),
             SignalId::Virtual(r#virtual) => r#virtual.to_string(),
         }
-        .to_case(Case::Kebab)
     }
 
     pub fn category(&self) -> String {
@@ -47,5 +45,14 @@ impl SignalId {
 
     pub fn format(&self) -> String {
         format!("[{}={}]", self.category(), self.name())
+    }
+}
+
+mod tests {
+    #[test]
+    fn test_signal_from_str() {
+        use super::*;
+        let iron = SignalId::Item(signals::Item::IronPlate);
+        assert_eq!(iron, SignalId::from_str("IronPlate").unwrap())
     }
 }

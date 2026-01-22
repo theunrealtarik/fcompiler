@@ -47,12 +47,9 @@ end
 
 local lines = {}
 
-table.insert(lines, "use strum_macros::{EnumString, Display};")
-table.insert(lines, "")
-
 for raw_cat, enum_name in pairs(categories) do
 	local names = signals_by_category[raw_cat]
-	table.insert(lines, string.format("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]"))
+	table.insert(lines, string.format("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum_macros::EnumString)]"))
 	table.insert(lines, string.format("pub enum %s {", enum_name))
 
 	for _, name in ipairs(names) do
@@ -60,6 +57,19 @@ for raw_cat, enum_name in pairs(categories) do
 		table.insert(lines, string.format("    %s,", variant))
 	end
 
+	table.insert(lines, "}")
+	table.insert(lines, "")
+
+	table.insert(lines, string.format("impl std::fmt::Display for %s {", enum_name))
+	table.insert(lines, string.format("    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {"))
+	table.insert(lines, "				let s = match self {")
+	for _, name in ipairs(names) do
+		local variant = to_rust_variant(name)
+		table.insert(lines, string.format('            %s::%s => "%s",', enum_name, variant, name))
+	end
+	table.insert(lines, "        };")
+	table.insert(lines, "        write!(f, \"{}\", s)")
+	table.insert(lines, "    }")
 	table.insert(lines, "}")
 	table.insert(lines, "")
 
