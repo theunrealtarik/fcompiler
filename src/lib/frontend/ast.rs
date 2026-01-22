@@ -1,6 +1,6 @@
 use crate::error::*;
 
-/// Meta
+// Meta
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Span {
@@ -29,7 +29,7 @@ impl IntoOptSpan for Option<Span> {
     }
 }
 
-/// Statements
+// Statements
 
 pub type Block = Vec<StatementContext>;
 
@@ -67,7 +67,7 @@ impl StatementContext {
     }
 }
 
-/// Program
+// Program
 
 #[derive(Debug, Default, Clone)]
 pub struct Program(Vec<StatementContext>);
@@ -102,7 +102,7 @@ impl From<Vec<StatementContext>> for Program {
     }
 }
 
-/// Expression
+// Expression
 
 #[derive(Debug, Clone)]
 pub enum Expression {
@@ -118,7 +118,7 @@ pub enum Expression {
     },
 }
 
-/// Operations
+// Operations
 
 #[derive(Debug, Clone, Copy, strum_macros::Display)]
 pub enum BinOp {
@@ -146,7 +146,7 @@ pub enum UnaryOp {
     Not,
 }
 
-/// Signals
+// Signals
 
 #[derive(Debug, Clone)]
 pub enum SignalValue {
