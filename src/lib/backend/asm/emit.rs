@@ -1,7 +1,7 @@
 #[derive(Debug)]
-pub struct AssemblyFormatter;
+pub struct AsmFormatter;
 
-impl AssemblyFormatter {
+impl AsmFormatter {
     pub fn mov<D: std::fmt::Display, S: std::fmt::Display>(dst: D, src: S) -> String {
         format!("mov {} {}\n", dst, src)
     }
@@ -20,6 +20,32 @@ impl AssemblyFormatter {
         R: std::fmt::Display,
     {
         format!("{} {} {} {}\n", op, dst, lhs, rhs)
+    }
+
+    pub fn test<L, R>(op: &str, lhs: L, rhs: R) -> String
+    where
+        L: std::fmt::Display,
+        R: std::fmt::Display,
+    {
+        format!("{} {} {}\n", op, lhs, rhs)
+    }
+
+    pub fn branch<L, R, A>(op: &str, lhs: L, rhs: R, addr: A) -> String
+    where
+        L: std::fmt::Display,
+        R: std::fmt::Display,
+        A: std::fmt::Display,
+    {
+        format!("{} {} {} {}\n", op, lhs, rhs, addr)
+    }
+
+    pub fn branch_test<L, R, A>(op: &str, lhs: L, rhs: R, label: A) -> String
+    where
+        L: std::fmt::Display,
+        R: std::fmt::Display,
+        A: std::fmt::Display,
+    {
+        format!("{} {} {} {}\n", op, lhs, rhs, label)
     }
 
     pub fn inc<D: std::fmt::Display>(dst: D) -> String {
@@ -43,5 +69,17 @@ impl AssemblyFormatter {
                 None => String::new(),
             }
         )
+    }
+
+    pub fn label(name: String) -> String {
+        format!(":{}\n", name)
+    }
+
+    pub fn jmp<A, O>(addr: A, offset: O) -> String
+    where
+        A: std::fmt::Display + std::fmt::Debug,
+        O: std::fmt::Display + std::fmt::Debug,
+    {
+        format!("jmp {} {}\n", addr, offset)
     }
 }

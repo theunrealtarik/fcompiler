@@ -1,8 +1,10 @@
 mod emit;
 mod ir;
+mod label;
 
 pub use emit::*;
 pub use ir::*;
+pub use label::*;
 
 use std::collections::HashMap;
 use std::ops::Deref;
@@ -44,11 +46,14 @@ impl Assembler {
     pub fn finish(&mut self) -> Result<&str, CompileError> {
         self.handle_statements(self.program.to_vec())?;
 
-        let instr = self.instr.clone();
-        let mut tmps = Self::count_temp(&instr);
+        let instructions = self.instr.clone();
+        let mut tmps = Self::count_temp(&instructions);
 
-        self.code.push_str(&AssemblyFormatter::clr::<String>(None));
-        for instr in instr.iter() {
+        log::debug!("{:#?}", tmps);
+
+        self.code.push_str(&AsmFormatter::clr::<String>(None));
+        for instr in instructions.iter() {
+            log::asm!("{:?}", instr);
             let asm_line = match instr {
                 Instruction::BinOp { dst, lhs, rhs, op } => {
                     let dst = self.ensure_location(dst)?;
@@ -57,22 +62,21 @@ impl Assembler {
 
                     match (dst, lhs, rhs) {
                         (Resolved::Reg(dst), Resolved::Reg(lhs), Resolved::Reg(rhs)) => {
-                            AssemblyFormatter::arith(&op.to_string(), dst, lhs, rhs)
+                            AsmFormatter::arith(&op.to_string(), dst, lhs, rhs)
                         }
                         (Resolved::Reg(dst), Resolved::Reg(r), Resolved::Imm(n)) => {
-                            AssemblyFormatter::arith(&op.to_string(), dst, r, n)
+                            AsmFormatter::arith(&op.to_string(), dst, r, n)
                         }
                         (Resolved::Reg(dst), Resolved::Imm(n), Resolved::Reg(r)) => {
                             if op.is_commutative() {
-                                AssemblyFormatter::arith(&op.to_string(), dst, r, n)
+                                AsmFormatter::arith(&op.to_string(), dst, r, n)
                             } else {
-                                AssemblyFormatter::arith(&op.to_string(), dst, n, r)
+                                AsmFormatter::arith(&op.to_string(), dst, n, r)
                             }
                         }
                         _ => unreachable!(),
                     }
                 }
-
                 Instruction::UnaryOp { dst, src, op } => {
                     let dst = self.ensure_location(dst)?;
                     let src = self.ensure_location(src)?;
@@ -81,17 +85,15 @@ impl Assembler {
                     let rhs = if dst == src { "" } else { "-1" };
 
                     match op {
-                        UnaryOp::Not => AssemblyFormatter::not(dst, Some(src)),
-                        UnaryOp::Neg => AssemblyFormatter::arith("mul", dst, lhs, rhs),
+                        UnaryOp::Not => AsmFormatter::not(dst, Some(src)),
+                        UnaryOp::Neg => AsmFormatter::arith("mul", dst, lhs, rhs),
                     }
                 }
-
                 Instruction::Mov { dst, src } => {
                     let dst = self.ensure_location(dst)?;
                     let src = self.ensure_location(src)?;
-                    AssemblyFormatter::mov(dst, src)
+                    AsmFormatter::mov(dst, src)
                 }
-
                 Instruction::MovSig {
                     dst,
                     src,
@@ -107,9 +109,8 @@ impl Assembler {
                         ));
                     }
 
-                    AssemblyFormatter::mov(dst, format!("{}{}", src, signal_id.format()))
+                    AsmFormatter::mov(dst, format!("{}{}", src, signal_id.format()))
                 }
-
                 Instruction::Out { src, signal_id } => {
                     let src = self.ensure_location(src)?;
                     let item = format!(
@@ -117,23 +118,40 @@ impl Assembler {
                         src,
                         signal_id.map(|s| s.format()).unwrap_or_default()
                     );
-                    AssemblyFormatter::mov(self.outputs.out(), item)
+                    AsmFormatter::mov(self.outputs.out(), item)
                 }
-
                 Instruction::Nop => String::new(),
                 Instruction::Inc { dst } => {
                     let dst = self.ensure_location(dst)?;
-                    AssemblyFormatter::inc(dst)
+                    AsmFormatter::inc(dst)
                 }
                 Instruction::Dec { dst } => {
                     let dst = self.ensure_location(dst)?;
-                    AssemblyFormatter::dec(dst)
+                    AsmFormatter::dec(dst)
                 }
+                Instruction::Compare { a, b, op, addr } => {
+                    let lhs = self.ensure_location(a)?;
+                    let rhs = self.ensure_location(b)?;
+
+                    if let Some(addr) = addr {
+                        AsmFormatter::branch(&op.branch_op(), lhs, rhs, addr)
+                    } else {
+                        AsmFormatter::test(&op.test_op(), lhs, rhs)
+                    }
+                }
+                Instruction::TestType { .. } => todo!(),
+                Instruction::Label { name } => AsmFormatter::label(name.to_string()),
+                Instruction::Jump { addr, offset } => AsmFormatter::jmp(
+                    addr,
+                    if let Some(offset) = offset {
+                        offset.to_string()
+                    } else {
+                        "".to_string()
+                    },
+                ),
             };
 
             self.code.push_str(&asm_line);
-
-            log::asm!("{:?}", instr);
             for src in instr.sources() {
                 if let Operand::Temp(temp_id) = src
                     && let Some(count) = tmps.get_mut(temp_id)
@@ -143,7 +161,7 @@ impl Assembler {
                         && let Some(reg) = self.memory.temps.remove(temp_id)
                     {
                         self.memory.free(reg);
-                        log::warn!("Freed {:?} → {:?}", reg, temp_id);
+                        log::warn!("Freed {:?} ← {:?}", reg, temp_id);
                     }
                 }
             }
@@ -156,8 +174,7 @@ impl Assembler {
                 clear_regs.push_str(&format!("{} ", dead_reg));
             }
 
-            self.code
-                .push_str(&AssemblyFormatter::clr(Some(clear_regs)));
+            self.code.push_str(&AsmFormatter::clr(Some(clear_regs)));
         }
 
         Ok(&self.code)
@@ -285,7 +302,40 @@ impl Assembler {
                         }
                     }
                 },
-                StatementKind::If { .. } => todo!(),
+                StatementKind::If { cond, then, alter } => {
+                    let id = Label::id();
+                    let label = Label::unique(if alter.is_some() { "else" } else { "end_if" }, id);
+                    let dst = self
+                        .proc_expr(&cond, None)
+                        .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
+
+                    if let StatementKind::Block { body } = then.deref().clone() {
+                        if body.is_empty() {
+                            continue;
+                        }
+
+                        if body.len() > 1 {
+                            self.br_ne(dst, Operand::Imm(0), label.clone());
+                            self.handle_statements(body)?;
+
+                            if alter.is_some() {
+                                self.jump(Label::unique("end_if", id), None);
+                            }
+
+                            self.label(label.clone());
+
+                            if let Some(alter) = alter
+                                && let StatementKind::Block { body } = alter.deref().clone()
+                            {
+                                self.handle_statements(body)?;
+                                self.label(Label::unique("end_if", id))
+                            }
+                        } else {
+                            self.test_ne(dst, Operand::Imm(0));
+                            self.handle_statements(body)?;
+                        }
+                    }
+                }
                 StatementKind::Block { body } => self.handle_statements(body)?,
             }
         }
@@ -317,14 +367,14 @@ impl Assembler {
         match expr {
             Expression::Value(signal) => match &signal.value {
                 SignalValue::Num(n) => Ok(Operand::immediate(*n)),
-                SignalValue::Var(r_ident) => match self.scopes.lookup_name(r_ident) {
+                SignalValue::Var(ident) => match self.scopes.lookup_name(ident) {
                     Some(SymbolHandle { sid, .. }) => Ok(Operand::Persistent(sid)),
                     None => Err(CompileErrorKind::Semantic(
-                        SemanticError::UndefinedVariable(r_ident.to_string()),
+                        SemanticError::UndefinedVariable(ident.to_string()),
                     )),
                 },
             },
-            Expression::Op { lhs, rhs, op } => {
+            Expression::BinOp { lhs, rhs, op } => {
                 let lhs = (lhs.deref()).clone();
                 let rhs = (rhs.deref()).clone();
 
@@ -332,7 +382,7 @@ impl Assembler {
                 let rhs_opr = self.proc_expr(&rhs, None)?;
 
                 let dst = p_dst.unwrap_or_else(Operand::temp);
-                self.lower_op(lhs_opr, rhs_opr, op, dst)
+                self.fold_arith_op(dst, lhs_opr, rhs_opr, op)
             }
             Expression::UnaryOp { expr, op } => match op {
                 UnaryOp::Neg => {
@@ -354,15 +404,25 @@ impl Assembler {
                     Ok(dst)
                 }
             },
+            Expression::BoolOp { lhs, rhs, op } => {
+                let lhs = (lhs.deref()).clone();
+                let rhs = (rhs.deref()).clone();
+
+                let lhs_opr = self.proc_expr(&lhs, None)?;
+                let rhs_opr = self.proc_expr(&rhs, None)?;
+
+                let dst = p_dst.unwrap_or_else(Operand::temp);
+                self.fold_cmp_op(dst, lhs_opr, rhs_opr, op)
+            }
         }
     }
 
-    fn lower_op(
+    fn fold_arith_op(
         &mut self,
+        dst: Operand,
         lhs: Operand,
         rhs: Operand,
         op: &BinOp,
-        dst: Operand,
     ) -> Result<Operand, CompileErrorKind> {
         match (lhs, rhs) {
             // X: N OP M
@@ -381,22 +441,22 @@ impl Assembler {
             // X: N OP R
             (Operand::Imm(n), Operand::Persistent(_) | Operand::Temp(_)) => {
                 if op.is_commutative() {
-                    return self.lower_op(rhs, Operand::Imm(n), op, dst);
+                    return self.fold_arith_op(dst, rhs, Operand::Imm(n), op);
                 }
-                self.proc_op(op, dst, Some(lhs), rhs);
+                self.emit_binop(op, dst, Some(lhs), rhs);
                 Ok(dst)
             }
 
             // X: R OP R
             // X: R OP N
             _ => {
-                self.proc_op(op, dst, Some(lhs), rhs);
+                self.emit_binop(op, dst, Some(lhs), rhs);
                 Ok(dst)
             }
         }
     }
 
-    fn proc_op(&mut self, op: &BinOp, dst: Operand, src: Option<Operand>, val: Operand) {
+    fn emit_binop(&mut self, op: &BinOp, dst: Operand, src: Option<Operand>, val: Operand) {
         let src = match src {
             Some(opr) => opr,
             None => dst,
@@ -429,115 +489,56 @@ impl Assembler {
         }
     }
 
+    fn fold_cmp_op(
+        &mut self,
+        dst: Operand,
+        lhs: Operand,
+        rhs: Operand,
+        op: &CmpOp,
+    ) -> Result<Operand, CompileErrorKind> {
+        match (lhs, rhs) {
+            (Operand::Imm(a), Operand::Imm(b)) => {
+                let r = match op {
+                    CmpOp::Eq => a == b,
+                    CmpOp::Ne => a != b,
+                    CmpOp::Lt => a < b,
+                    CmpOp::Le => a <= b,
+                    CmpOp::Gt => a > b,
+                    CmpOp::Ge => a >= b,
+                    CmpOp::And => a * b != 0,
+                    CmpOp::Or => a + b != 0,
+                };
+
+                Ok(Operand::Imm(r.into()))
+            }
+            _ => {
+                self.emit_cmp_op(op, dst, lhs, rhs);
+                Ok(dst)
+            }
+        }
+    }
+
+    fn emit_cmp_op(&mut self, op: &CmpOp, dst: Operand, a: Operand, b: Operand) {
+        match op {
+            CmpOp::Eq => self.test_eq(a, b),
+            CmpOp::Ne => self.test_ne(a, b),
+            CmpOp::Lt => self.test_lt(a, b),
+            CmpOp::Le => self.test_le(a, b),
+            CmpOp::Gt => self.test_gt(a, b),
+            CmpOp::Ge => self.test_ge(a, b),
+            CmpOp::And => self.mul(dst, a, b),
+            CmpOp::Or => self.add(dst, a, b),
+        }
+
+        if !(op.is_and() || op.is_or()) {
+            self.mov(dst, Operand::Imm(1));
+        }
+    }
+
     fn cast(&mut self, target: Operand, signal_id: crate::game::SignalId) {
         let caster = Operand::temp();
         self.mov_sig(caster, Operand::Imm(1), signal_id);
         self.mul(caster, target, target);
         self.mov(target, caster);
-    }
-}
-
-/// IR emitting helpers
-impl Assembler {
-    /// MOV: dst = src
-    pub fn mov(&mut self, dst: Operand, src: Operand) {
-        self.instr.push(Instruction::Mov { dst, src });
-    }
-
-    /// ADD: dst = lhs + rhs
-    pub fn add(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
-        self.instr.push(Instruction::BinOp {
-            dst,
-            lhs,
-            rhs,
-            op: BinOp::Add,
-        });
-    }
-
-    /// INC: dst += 1
-    pub fn inc(&mut self, dst: Operand) {
-        self.instr.push(Instruction::Inc { dst })
-    }
-
-    /// DEC: dst -= 1
-    pub fn dec(&mut self, dst: Operand) {
-        self.instr.push(Instruction::Dec { dst })
-    }
-
-    /// SUB: dst = lhs - rhs
-    pub fn sub(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
-        self.instr.push(Instruction::BinOp {
-            dst,
-            lhs,
-            rhs,
-            op: BinOp::Sub,
-        });
-    }
-
-    /// MUL: dst = lhs * rhs
-    pub fn mul(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
-        self.instr.push(Instruction::BinOp {
-            dst,
-            lhs,
-            rhs,
-            op: BinOp::Mul,
-        });
-    }
-
-    /// DIV: dst = lhs / rhs
-    pub fn div(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
-        self.instr.push(Instruction::BinOp {
-            dst,
-            lhs,
-            rhs,
-            op: BinOp::Div,
-        });
-    }
-
-    /// MOD: dst = lhs % rhs
-    pub fn modu(&mut self, dst: Operand, lhs: Operand, rhs: Operand) {
-        self.instr.push(Instruction::BinOp {
-            dst,
-            lhs,
-            rhs,
-            op: BinOp::Mod,
-        });
-    }
-
-    /// Unary NOT: dst = !src
-    pub fn not(&mut self, dst: Operand, src: Operand) {
-        self.instr.push(Instruction::UnaryOp {
-            dst,
-            src,
-            op: UnaryOp::Not,
-        });
-    }
-
-    /// Unary NEG: dst = -src
-    pub fn neg(&mut self, dst: Operand, src: Operand) {
-        self.instr.push(Instruction::UnaryOp {
-            dst,
-            src,
-            op: UnaryOp::Neg,
-        });
-    }
-
-    /// Output instruction: send src to signal
-    pub fn out(&mut self, src: Operand, signal_id: Option<crate::game::SignalId>) {
-        self.instr.push(Instruction::Out { src, signal_id });
-    }
-
-    /// Move signal
-    pub fn mov_sig(&mut self, dst: Operand, src: Operand, signal_id: crate::game::SignalId) {
-        self.instr.push(Instruction::MovSig {
-            dst,
-            src,
-            signal_id,
-        });
-    }
-
-    /// Push a NOP
-    pub fn nop(&mut self) {
-        self.instr.push(Instruction::Nop);
     }
 }

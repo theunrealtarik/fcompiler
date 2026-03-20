@@ -41,7 +41,7 @@ pub enum StatementKind {
     If {
         cond: Expression,
         then: Box<StatementKind>,
-        r#else: Box<StatementKind>,
+        alter: Option<Box<StatementKind>>,
     },
     Declare {
         ident: String,
@@ -107,7 +107,7 @@ impl From<Vec<StatementContext>> for Program {
 #[derive(Debug, Clone)]
 pub enum Expression {
     Value(Signal),
-    Op {
+    BinOp {
         lhs: Box<Expression>,
         rhs: Box<Expression>,
         op: BinOp,
@@ -115,6 +115,11 @@ pub enum Expression {
     UnaryOp {
         expr: Box<Expression>,
         op: UnaryOp,
+    },
+    BoolOp {
+        lhs: Box<Expression>,
+        rhs: Box<Expression>,
+        op: CmpOp,
     },
 }
 
@@ -144,6 +149,70 @@ impl BinOp {
 pub enum UnaryOp {
     Neg,
     Not,
+}
+
+#[derive(Debug, Clone, Copy, strum_macros::Display, strum_macros::EnumIs)]
+pub enum CmpOp {
+    #[strum(to_string = "eq")]
+    Eq,
+    #[strum(to_string = "ne")]
+    Ne,
+    #[strum(to_string = "lt")]
+    Lt,
+    #[strum(to_string = "le")]
+    Le,
+    #[strum(to_string = "gt")]
+    Gt,
+    #[strum(to_string = "ge")]
+    Ge,
+    #[strum(to_string = "mul")]
+    And,
+    #[strum(to_string = "add")]
+    Or,
+}
+
+impl CmpOp {
+    pub fn test_op(&self) -> String {
+        match self {
+            Self::And | Self::Or => self.to_string(),
+            cmp => format!("t{}", cmp),
+        }
+    }
+
+    pub fn branch_op(&self) -> String {
+        match self {
+            Self::And | Self::Or => self.to_string(),
+            cmp => format!("b{}", cmp),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum_macros::Display)]
+pub enum BitOp {
+    #[strum(to_string = "band")]
+    BitAnd,
+    #[strum(to_string = "bor")]
+    BitOr,
+    #[strum(to_string = "bxor")]
+    BitXor,
+    #[strum(to_string = "bnot")]
+    BitNot,
+    #[strum(to_string = "bsl")]
+    ShiftLeft,
+    #[strum(to_string = "bsr")]
+    ShiftRight,
+}
+
+impl BitOp {
+    pub fn is_commutative(&self) -> bool {
+        matches!(self, Self::BitAnd | Self::BitOr | Self::BitXor)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum OperationKind {
+    Arithmetic(BinOp),
+    Comparative(CmpOp),
 }
 
 // Signals

@@ -1,0 +1,10 @@
+let x = 2;
+if x > 5 {
+	let iron: IronPlate = 10;
+	let result = iron * 5;
+	out(result);
+} else {
+    let a = 3;
+    let b = 7;
+    let x = (a + b) * (2 - a);
+}

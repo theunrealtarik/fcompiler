@@ -16,7 +16,6 @@ pub mod compiler {
             let stmts = Parser::new(src)?.parse()?;
             let program = Program::from(stmts);
             let mut assembler = Assembler::new(program);
-
             assembler.finish()?;
 
             println!("{}", assembler.code());

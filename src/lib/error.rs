@@ -1,3 +1,5 @@
+use colored::Colorize;
+
 use crate::frontend::ast::*;
 use std::fmt;
 
@@ -205,10 +207,10 @@ pub enum CompileErrorKind {
 impl fmt::Display for CompileErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Lex(err) => write!(f, "Lexer error: {}", err),
-            Self::Parse(err) => write!(f, "Parser error: {}", err),
-            Self::Semantic(err) => write!(f, "Semantics error: {}", err),
-            Self::Generation(err) => write!(f, "Generation error: {}", err),
+            Self::Lex(err) => write!(f, "{} {}", "Lexer error:".bold().red(), err),
+            Self::Parse(err) => write!(f, "{} {}", "Parser error:".bold().red(), err),
+            Self::Semantic(err) => write!(f, "{} {}", "Semantic error:".bold().red(), err),
+            Self::Generation(err) => write!(f, "{} {}", "Generation error:".bold().red(), err),
         }
     }
 }
