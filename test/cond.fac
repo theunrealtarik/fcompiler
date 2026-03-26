@@ -1,10 +1,10 @@
-let x = 2;
-if x > 5 {
-	let iron: IronPlate = 10;
-	let result = iron * 5;
-	out(result);
+let x = 5;
+let y = 2;
+
+if x > y {
+    let i: IronPlate = 512;
+    out(i);
 } else {
-    let a = 3;
-    let b = 7;
-    let x = (a + b) * (2 - a);
+    let c: CopperPlate = 1024;
+    out(c);
 }

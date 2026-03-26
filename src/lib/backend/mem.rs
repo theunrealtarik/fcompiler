@@ -87,7 +87,7 @@ impl RegisterAllocator {
     }
 
     pub fn used_regs(&self) -> u32 {
-        self.free.count_ones()
+        self.free.count_zeros()
     }
 }
 

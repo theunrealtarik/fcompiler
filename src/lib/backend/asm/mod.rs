@@ -49,8 +49,6 @@ impl Assembler {
         let instructions = self.instr.clone();
         let mut tmps = Self::count_temp(&instructions);
 
-        log::debug!("{:#?}", tmps);
-
         self.code.push_str(&AsmFormatter::clr::<String>(None));
         for instr in instructions.iter() {
             log::asm!("{:?}", instr);
@@ -304,35 +302,43 @@ impl Assembler {
                 },
                 StatementKind::If { cond, then, alter } => {
                     let id = Label::id();
-                    let label = Label::unique(if alter.is_some() { "else" } else { "end_if" }, id);
+                    let label =
+                        Label::unique(if alter.is_some() { "if_else" } else { "if_end" }, id);
                     let dst = self
                         .proc_expr(&cond, None)
                         .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
 
                     if let StatementKind::Block { body } = then.deref().clone() {
+                        let is_singular_instr = body.len() == 1;
                         if body.is_empty() {
                             continue;
                         }
 
-                        if body.len() > 1 {
+                        if is_singular_instr {
+                            self.test_ne(dst, Operand::Imm(0));
+                            self.handle_statements(body)?;
+                            self.jump(Label::from("ipt"), Some(1));
+                        } else {
                             self.br_ne(dst, Operand::Imm(0), label.clone());
                             self.handle_statements(body)?;
-
                             if alter.is_some() {
-                                self.jump(Label::unique("end_if", id), None);
+                                self.jump(Label::unique("if_end", id), None);
                             }
 
                             self.label(label.clone());
+                        }
 
-                            if let Some(alter) = alter
-                                && let StatementKind::Block { body } = alter.deref().clone()
-                            {
-                                self.handle_statements(body)?;
-                                self.label(Label::unique("end_if", id))
+                        if let Some(alter) = alter
+                            && let StatementKind::Block { body } = alter.deref().clone()
+                        {
+                            if body.is_empty() {
+                                continue;
                             }
-                        } else {
-                            self.test_ne(dst, Operand::Imm(0));
+
                             self.handle_statements(body)?;
+                            if !is_singular_instr {
+                                self.label(Label::unique("if_end", id))
+                            }
                         }
                     }
                 }
