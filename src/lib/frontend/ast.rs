@@ -40,8 +40,20 @@ pub enum StatementKind {
     },
     If {
         cond: Expression,
-        then: Box<StatementKind>,
-        alter: Option<Box<StatementKind>>,
+        then: Block,
+        alter: Option<Block>,
+    },
+    Loop {
+        body: Block,
+    },
+    While {
+        body: Block,
+        cond: Expression,
+    },
+    Break,
+    Continue,
+    Return {
+        data: Expression,
     },
     Declare {
         ident: String,

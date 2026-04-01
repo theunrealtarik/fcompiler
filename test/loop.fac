@@ -1,0 +1,17 @@
+let x = 0;
+
+loop {
+    let y = 10;
+    x = x * 2 + y;
+
+    loop {
+        y = y + 128;
+        if y >= 1024 {
+            break;
+        }
+    }
+
+    if x >= 256 {
+        break;
+    }
+}

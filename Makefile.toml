@@ -29,7 +29,7 @@ args = ["./scripts/signals/main.lua"]
 env = { "RUST_LOG" = "lib=trace,asm=trace", "RUST_BACKTRACE" = "1" }
 
 command = "cargo"
-args = ["run", "--", "./test/cond.fac"]
+args = ["run", "--", "${@}"]
 
 [tasks.flow]
 dependencies = ["format", "generate", "build", "test"]

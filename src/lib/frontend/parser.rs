@@ -4,6 +4,7 @@ use super::token::*;
 
 use crate::error::*;
 use crate::game::SignalId;
+use crate::log;
 
 #[derive(Default, Debug)]
 pub struct Parser {
@@ -55,6 +56,16 @@ impl Parser {
                 Token::Out => self.parse_out(),
                 Token::LCurly => self.parse_block(),
                 Token::If => self.parse_if(),
+                Token::For => todo!(),
+                Token::Loop => self.parse_loop(),
+                Token::While => todo!(),
+                Token::Break => {
+                    self.consume()?;
+                    self.expect(Token::Semicolon)?;
+                    Ok(StatementKind::Break)
+                }
+                Token::Continue => todo!(),
+                Token::Return => todo!(),
                 _ => {
                     return Err(parse_err!(
                         ParseError::UnexpectedToken {
@@ -157,26 +168,30 @@ impl Parser {
         }
     }
 
-    fn parse_block(&mut self) -> Result<StatementKind, CompileError> {
+    fn parse_block_literal(&mut self) -> Result<Vec<StatementContext>, CompileError> {
         self.expect(Token::LCurly)?;
         let body = self.parse_until(Token::RCurly)?;
         self.expect(Token::RCurly)?;
 
-        Ok(StatementKind::Block { body })
+        Ok(body)
+    }
+
+    fn parse_block(&mut self) -> Result<StatementKind, CompileError> {
+        Ok(StatementKind::Block {
+            body: self.parse_block_literal()?,
+        })
     }
 
     fn parse_if(&mut self) -> Result<StatementKind, CompileError> {
         self.expect(Token::If)?;
 
         let tokens = self.collect_until(Token::LCurly)?;
-        let then = Box::new(self.parse_block()?);
+        let then = self.parse_block_literal()?;
 
         let mut alter = None;
         if let Some(Token::Else) = self.peek() {
             self.consume()?;
-            alter = Some(Box::new(StatementKind::Block {
-                body: self.parse_until(Token::RCurly)?,
-            }));
+            alter = Some(self.parse_block_literal()?);
         }
 
         let expr = Expresso::new(&tokens).parse_expression(0)?;
@@ -185,6 +200,12 @@ impl Parser {
             then,
             alter,
         })
+    }
+
+    fn parse_loop(&mut self) -> Result<StatementKind, CompileError> {
+        self.expect(Token::Loop)?;
+        let body = self.parse_block_literal()?;
+        Ok(StatementKind::Loop { body })
     }
 
     fn peek(&self) -> Option<&Token> {

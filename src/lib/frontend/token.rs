@@ -28,7 +28,12 @@ pub enum Token {
     Out,
     If,
     Else,
+    For,
+    Loop,
     While,
+    Break,
+    Return,
+    Continue,
 
     // literals
     Number(i32),
@@ -144,6 +149,12 @@ impl Token {
             }};
         }
 
+        macro_rules! skip_whitespace {
+            () => {{
+                Self::skip_while(&mut chars, |c| c.is_whitespace());
+            }};
+        }
+
         while let Some(&ch) = chars.peek() {
             match ch {
                 ' ' | '\t' => {
@@ -158,31 +169,39 @@ impl Token {
                         c.is_alphanumeric() || c == lexemes::CH_UNDERSCORE
                     });
 
-                    Self::skip_whitespace(&mut chars);
-
-                    let mut sid: Option<String> = None;
-                    if let Some(&':') = chars.peek() {
-                        chars.next();
-
-                        Self::skip_whitespace(&mut chars);
-                        let type_name = Self::collect_while(&mut chars, |c| c.is_alphabetic());
-
-                        if !type_name.is_empty() {
-                            sid = Some(type_name);
-                        }
-                    }
+                    skip_whitespace!();
 
                     let token = match ident.as_str() {
                         KW_LET => Token::Let,
                         KW_OUT => Token::Out,
                         KW_IF => Token::If,
+                        KW_LOOP => Token::Loop,
+                        KW_WHILE => Token::While,
+                        KW_BREAK => Token::Break,
+                        KW_RETURN => Token::Return,
+                        KW_CONTINUE => Token::Continue,
                         KW_ELSE => Token::Else,
                         KW_TRUE => Token::Boolean(true),
                         KW_FALSE => Token::Boolean(false),
-                        _ => Token::Ident {
-                            name: ident.to_string(),
-                            sid,
-                        },
+                        _ => {
+                            let mut sid: Option<String> = None;
+                            if let Some(&':') = chars.peek() {
+                                chars.next();
+
+                                skip_whitespace!();
+                                let type_name =
+                                    Self::collect_while(&mut chars, |c| c.is_alphabetic());
+
+                                if !type_name.is_empty() {
+                                    sid = Some(type_name);
+                                }
+                            }
+
+                            Token::Ident {
+                                name: ident.to_string(),
+                                sid,
+                            }
+                        }
                     };
 
                     tokens.push(TokenContext {
@@ -234,7 +253,7 @@ impl Token {
                     });
                     chars.next();
                 }
-                CH_NOT => maybe_double!(Token::Bang, Token::Equal, CH_EQ),
+                CH_NOT => maybe_double!(Token::Bang, Token::BangEqual, CH_EQ),
                 CH_EQ => maybe_double!(Token::Equal, Token::EqualEqual, CH_EQ),
                 CH_GT => maybe_double!(Token::Greater, Token::GreaterEqual, CH_EQ),
                 CH_LT => maybe_double!(Token::Lesser, Token::LesserEqual, CH_EQ),
@@ -276,13 +295,6 @@ impl Token {
                 break;
             }
         }
-    }
-
-    fn skip_whitespace<I>(chars: &mut std::iter::Peekable<I>)
-    where
-        I: Iterator<Item = char>,
-    {
-        Self::skip_while(chars, |c| c.is_whitespace());
     }
 
     fn collect_while<I, F>(chars: &mut std::iter::Peekable<I>, pred: F) -> String

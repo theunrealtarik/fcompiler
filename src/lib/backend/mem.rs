@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use crate::log;
+
 // channeling
 
 pub enum MemoryChannel {

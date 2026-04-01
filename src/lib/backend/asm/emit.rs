@@ -36,7 +36,7 @@ impl AsmFormatter {
         R: std::fmt::Display,
         A: std::fmt::Display,
     {
-        format!("{} {} {} {}\n", op, lhs, rhs, addr)
+        format!("{} {} {} :{}\n", op, lhs, rhs, addr)
     }
 
     pub fn branch_test<L, R, A>(op: &str, lhs: L, rhs: R, label: A) -> String
@@ -45,7 +45,7 @@ impl AsmFormatter {
         R: std::fmt::Display,
         A: std::fmt::Display,
     {
-        format!("{} {} {} {}\n", op, lhs, rhs, label)
+        format!("{} {} {} :{}\n", op, lhs, rhs, label)
     }
 
     pub fn inc<D: std::fmt::Display>(dst: D) -> String {
@@ -72,7 +72,7 @@ impl AsmFormatter {
     }
 
     pub fn label(name: String) -> String {
-        format!(":{}\n", name)
+        format!("{}\n", name)
     }
 
     pub fn jmp<A, O>(addr: A, offset: O) -> String

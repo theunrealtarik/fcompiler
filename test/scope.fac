@@ -2,6 +2,10 @@ let a: IronPlate = 1;
 let b: CopperPlate = 2;
 
 {
+	a = b + 8;
+}
+
+{
     let a = a + 3;
     let c = b + 5;
     out(a);

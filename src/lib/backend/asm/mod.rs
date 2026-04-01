@@ -44,7 +44,9 @@ impl Assembler {
     }
 
     pub fn finish(&mut self) -> Result<&str, CompileError> {
-        self.handle_statements(self.program.to_vec())?;
+        let stmts = self.program.to_vec();
+        let global = self.scopes.enter_scope();
+        self.handle_statements(stmts, global.clone())?;
 
         let instructions = self.instr.clone();
         let mut tmps = Self::count_temp(&instructions);
@@ -156,14 +158,34 @@ impl Assembler {
                 {
                     *count -= 1;
                     if *count == 0
-                        && let Some(reg) = self.memory.temps.remove(temp_id)
+                        && let Some(_reg) = self.memory.temps.remove(temp_id)
                     {
-                        self.memory.free(reg);
-                        log::warn!("Freed {:?} ← {:?}", reg, temp_id);
+                        // self.code.push_str(&AsmFormatter::clr(Some(reg))); // temp fix: using regs marked as free
+                        // self.memory.free(reg);
+                        // log::warn!("Freed {:?} ← {:?}", reg, temp_id);
                     }
                 }
             }
         }
+
+        self.scopes.leave_scope(|scope| {
+            let scope = scope.borrow();
+            let locals = scope.locals.borrow();
+
+            if scope.metadata.kind.is_global() {
+                return;
+            }
+
+            log::warn!(" {:?} {:#?}", scope.metadata.kind, locals);
+            for sym in locals.values() {
+                match sym.borrow().loc {
+                    Location::Reg(reg) => {
+                        self.memory.free(reg);
+                    }
+                    Location::Stk(_) => todo!(),
+                }
+            }
+        });
 
         let dead_marks = self.memory.dead_marks();
         if !dead_marks.is_empty() {
@@ -223,145 +245,191 @@ impl Assembler {
         map
     }
 
-    fn handle_statements(&mut self, stmts: Vec<StatementContext>) -> Result<(), CompileError> {
-        let current = self.scopes.enter_scope();
-        let current = current.borrow();
-
+    fn handle_statements(
+        &mut self,
+        stmts: Vec<StatementContext>,
+        scope: SharedScope,
+    ) -> Result<(), CompileError> {
         for stmt in stmts {
-            match stmt.kind {
-                StatementKind::Declare { ident, sigid, expr } => {
-                    let reg = self
-                        .memory
-                        .alloc()
-                        .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
-                    let var = Symbol::new(ident, Location::Reg(reg), sigid);
+            self.handle_statement(stmt, scope.clone())?;
+        }
 
-                    let dst = Operand::persistent();
-                    let opr = self
-                        .proc_expr(&expr, Some(dst))
-                        .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
+        Ok(())
+    }
 
-                    self.scopes.bind(SymbolId(dst.into()), var);
+    fn handle_statement(
+        &mut self,
+        stmt: StatementContext,
+        _: SharedScope,
+    ) -> Result<(), CompileError> {
+        match stmt.kind {
+            StatementKind::Declare { ident, sigid, expr } => {
+                let reg = self
+                    .memory
+                    .alloc()
+                    .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
+                let var = Symbol::new(ident, Location::Reg(reg), sigid);
 
-                    if dst != opr {
-                        if let Some(signal_id) = sigid
-                            && opr.is_imm()
-                        {
-                            self.mov_sig(dst, opr, signal_id);
-                        } else {
-                            self.mov(dst, opr);
-                        }
-                    }
-                }
-                StatementKind::Assign { ident, expr } => {
-                    let sid = match current.locals.borrow().lookup_name(&ident) {
-                        Some(SymbolHandle { sid, .. }) => sid,
-                        None => {
-                            return Err(CompileError::new(
-                                CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
-                                    ident.to_string(),
-                                )),
-                                Some(stmt.span),
-                            ));
-                        }
-                    };
+                let dst = Operand::persistent();
+                let opr = self
+                    .proc_expr(&expr, Some(dst))
+                    .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
 
-                    let dst = Operand::Persistent(sid);
-                    let opr = self
-                        .proc_expr(&expr, Some(dst))
-                        .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
+                self.scopes.bind(SymbolId(dst.into()), var);
 
-                    if opr != dst {
+                if dst != opr {
+                    if let Some(signal_id) = sigid
+                        && opr.is_imm()
+                    {
+                        self.mov_sig(dst, opr, signal_id);
+                    } else {
                         self.mov(dst, opr);
                     }
                 }
-                StatementKind::Out(signal) => match signal.value {
-                    SignalValue::Num(scalar) => {
-                        self.out(Operand::Imm(scalar), signal.id);
+            }
+            StatementKind::Assign { ident, expr } => {
+                let sid = match self.scopes.lookup_name(&ident) {
+                    Some(SymbolHandle { sid, .. }) => sid,
+                    None => {
+                        return Err(CompileError::new(
+                            CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
+                                ident.to_string(),
+                            )),
+                            Some(stmt.span),
+                        ));
                     }
-                    SignalValue::Var(ident) => {
-                        if let Some(SymbolHandle { sid, .. }) =
-                            current.locals.borrow().lookup_name(&ident)
-                        {
-                            let target = Operand::Persistent(sid);
+                };
 
-                            if let Some(signal_id) = signal.id {
-                                self.cast(target, signal_id);
-                            }
+                let dst = Operand::Persistent(sid);
+                let opr = self
+                    .proc_expr(&expr, Some(dst))
+                    .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
 
-                            self.out(target, signal.id);
-                        } else {
-                            return Err(CompileError::new(
-                                CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
-                                    ident.clone(),
-                                )),
-                                Some(stmt.span),
-                            ));
-                        }
-                    }
-                },
-                StatementKind::If { cond, then, alter } => {
-                    let id = Label::id();
-                    let label =
-                        Label::unique(if alter.is_some() { "if_else" } else { "if_end" }, id);
-                    let dst = self
-                        .proc_expr(&cond, None)
-                        .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
+                if opr != dst {
+                    self.mov(dst, opr);
+                }
+            }
+            StatementKind::Out(signal) => match signal.value {
+                SignalValue::Num(scalar) => {
+                    self.out(Operand::Imm(scalar), signal.id);
+                }
+                SignalValue::Var(ident) => {
+                    if let Some(SymbolHandle { sid, .. }) = self.scopes.lookup_name(&ident) {
+                        let target = Operand::Persistent(sid);
 
-                    if let StatementKind::Block { body } = then.deref().clone() {
-                        let is_singular_instr = body.len() == 1;
-                        if body.is_empty() {
-                            continue;
+                        if let Some(signal_id) = signal.id {
+                            self.cast(target, signal_id);
                         }
 
-                        if is_singular_instr {
-                            self.test_ne(dst, Operand::Imm(0));
-                            self.handle_statements(body)?;
-                            self.jump(Label::from("ipt"), Some(1));
-                        } else {
-                            self.br_ne(dst, Operand::Imm(0), label.clone());
-                            self.handle_statements(body)?;
-                            if alter.is_some() {
-                                self.jump(Label::unique("if_end", id), None);
-                            }
-
-                            self.label(label.clone());
-                        }
-
-                        if let Some(alter) = alter
-                            && let StatementKind::Block { body } = alter.deref().clone()
-                        {
-                            if body.is_empty() {
-                                continue;
-                            }
-
-                            self.handle_statements(body)?;
-                            if !is_singular_instr {
-                                self.label(Label::unique("if_end", id))
-                            }
-                        }
+                        self.out(target, signal.id);
+                    } else {
+                        return Err(CompileError::new(
+                            CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
+                                ident.clone(),
+                            )),
+                            Some(stmt.span),
+                        ));
                     }
                 }
-                StatementKind::Block { body } => self.handle_statements(body)?,
+            },
+            StatementKind::If { cond, then, alter } => {
+                let label = Label::raw(Label::COND);
+                let label_suffixed = label.suffix(if alter.is_some() { "then" } else { "end" });
+
+                let dst = self
+                    .proc_expr(&cond, None)
+                    .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
+
+                let is_singular_instr = then.len() == 1;
+                if then.is_empty() {
+                    return Ok(());
+                }
+
+                let then_scope = self.scopes.enter_scope_explicit(
+                    ScopeMetadataBuilder::default()
+                        .kind(ScopeKind::Then)
+                        .build()
+                        .unwrap(),
+                );
+
+                if is_singular_instr {
+                    self.test_ne(dst, Operand::Imm(0));
+                    self.handle_statements(then, then_scope.clone())?;
+                    self.jump(Label::new(LabelKind::Ipt), Some(1));
+                } else {
+                    self.br_ne(dst, Operand::Imm(1), label_suffixed.clone());
+                    self.handle_statements(then, then_scope.clone())?;
+                    if alter.is_some() {
+                        self.jump(label.suffix("end"), None);
+                    }
+
+                    self.label(label_suffixed.clone());
+                }
+
+                if let Some(alter) = alter {
+                    if alter.is_empty() {
+                        return Ok(());
+                    }
+
+                    let else_scope = self.scopes.enter_scope_explicit(
+                        ScopeMetadataBuilder::default()
+                            .kind(ScopeKind::Else)
+                            .build()
+                            .unwrap(),
+                    );
+                    self.handle_statements(alter, else_scope.clone())?;
+                    if !is_singular_instr {
+                        self.label(label.suffix("end"))
+                    }
+                }
             }
+            StatementKind::Loop { body } => {
+                let label = Label::raw(Label::LOOP);
+                let loop_start = label.suffix("start");
+                let loop_end = label.suffix("finish");
+
+                let loop_scope = self.scopes.enter_scope_explicit(
+                    ScopeMetadataBuilder::default()
+                        .kind(ScopeKind::Loop)
+                        .exit_label(loop_end.clone())
+                        .build()
+                        .unwrap(),
+                );
+
+                self.label(loop_start.clone());
+                self.handle_statements(body, loop_scope.clone())?;
+                self.jump(loop_start, None);
+                self.label(loop_end);
+            }
+            StatementKind::While { .. } => todo!(),
+            StatementKind::Block { body } => {
+                let local_scope = self.scopes.enter_scope();
+                self.handle_statements(body, local_scope.clone())?
+            }
+            StatementKind::Break => {
+                for scope in self.scopes.ladder() {
+                    let exit_label = {
+                        let scope = scope.borrow();
+                        match scope.metadata.kind {
+                            ScopeKind::Global => {
+                                return Err(gen_err!(GeneratorError::InvalidInstruction {
+                                    msg: String::from("break statement not within loop")
+                                }));
+                            }
+                            ScopeKind::Loop => scope.metadata.exit_label.clone(),
+                            _ => None,
+                        }
+                    };
+
+                    if let Some(label) = exit_label {
+                        self.jump(label, None);
+                        break;
+                    }
+                }
+            }
+            _ => unimplemented!(),
         }
 
-        self.scopes.leave_scope(|scope| {
-            let scope = scope.borrow();
-            let locals = scope.locals.borrow();
-
-            if scope.is_global {
-                return;
-            }
-
-            log::warn!(" {:#?}", locals);
-            for sym in locals.values() {
-                match sym.borrow().loc {
-                    Location::Reg(reg) => self.memory.free(reg),
-                    Location::Stk(_) => todo!(),
-                }
-            }
-        });
         Ok(())
     }
 

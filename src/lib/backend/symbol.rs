@@ -1,12 +1,38 @@
 use super::mem::Location;
-use crate::{backend::mem::Register, game::SignalId};
+use crate::{
+    backend::{asm::Label, mem::Register},
+    game::SignalId,
+};
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
+#[derive(Debug, Default, Clone, Copy, strum_macros::EnumIs)]
+pub enum ScopeKind {
+    Global,
+    #[default]
+    Local,
+    Then,
+    Else,
+    For,
+    While,
+    Loop,
+}
+
+#[derive(Debug, Default, derive_builder::Builder)]
+pub struct ScopeMetadata {
+    #[builder(setter(skip = true))]
+    depth: usize,
+    pub kind: ScopeKind,
+    #[builder(setter(into, strip_option), default = None)]
+    pub start_label: Option<Label>,
+    #[builder(setter(into, strip_option), default = None)]
+    pub exit_label: Option<Label>,
+}
+
 #[derive(Debug, Default)]
 pub struct Scope {
-    pub is_global: bool,
     pub locals: RefCell<SymbolTable>,
+    pub metadata: ScopeMetadata,
 }
 
 pub type SharedScope = Rc<RefCell<Scope>>;
@@ -32,13 +58,29 @@ impl ScopeStack {
         None
     }
 
+    pub fn ladder(&self) -> std::iter::Rev<std::slice::Iter<'_, Rc<RefCell<Scope>>>> {
+        self.scopes.iter().rev()
+    }
+
     pub fn birdeye(&self) -> &HashMap<SymbolId, SharedSymbol> {
         &self.birdeye
     }
 
     pub fn enter_scope(&mut self) -> SharedScope {
+        self.enter_scope_explicit(ScopeMetadata::default())
+    }
+
+    pub fn enter_scope_explicit(&mut self, metadata: ScopeMetadata) -> SharedScope {
         let scope = Scope {
-            is_global: self.scopes.is_empty(),
+            metadata: ScopeMetadata {
+                kind: if self.scopes.is_empty() {
+                    ScopeKind::Global
+                } else {
+                    metadata.kind
+                },
+                depth: self.scopes.len() + 1,
+                ..metadata
+            },
             ..Default::default()
         };
 

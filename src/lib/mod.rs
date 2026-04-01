@@ -12,14 +12,12 @@ pub mod compiler {
     pub struct Compiler;
 
     impl Compiler {
-        pub fn compile(src: &str) -> Result<(), crate::error::CompileError> {
+        pub fn compile(src: &str) -> Result<String, crate::error::CompileError> {
             let stmts = Parser::new(src)?.parse()?;
             let program = Program::from(stmts);
             let mut assembler = Assembler::new(program);
             assembler.finish()?;
-
-            println!("{}", assembler.code());
-            Ok(())
+            Ok(assembler.code().clone())
         }
     }
 }

@@ -136,6 +136,7 @@ pub enum GeneratorError {
     InvalidRegister,
     NonAddressableLocation,
     NonAddressableSymbol,
+    InvalidInstruction { msg: String },
 }
 
 #[macro_export]
@@ -163,6 +164,7 @@ impl fmt::Display for GeneratorError {
             Self::InvalidRegister => write!(f, "invalid register."),
             Self::NonAddressableLocation => write!(f, "non-addressable location."),
             Self::NonAddressableSymbol => write!(f, "non-addressable symbol."),
+            Self::InvalidInstruction { msg } => write!(f, "invalid instruction: {}", msg),
         }
     }
 }
@@ -186,7 +188,7 @@ impl fmt::Display for CompileError {
             Some(span) => write!(
                 f,
                 "{} {}",
-                format!("[line: {}]", span.line + 1).dimmed(),
+                format!("[line: {}]", span.line).dimmed(),
                 self.kind
             ),
             None => write!(f, "{}", self.kind),

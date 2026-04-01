@@ -1,8 +1,10 @@
 /target
 
 .vscode
+.zed
 .git
 .github
+
 
 scripts/signals/data_raw.lua
 src/lib/game/signals.rs

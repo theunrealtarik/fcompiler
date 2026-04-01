@@ -2,8 +2,6 @@ use lazy_static::lazy_static;
 use std::sync::Mutex;
 use std::vec;
 
-use super::label::*;
-
 lazy_static! {
     static ref TEMP_ID_TRACK: Mutex<i32> = Mutex::new(0);
     static ref SYMB_ID_TRACK: Mutex<i32> = Mutex::new(0);
@@ -58,6 +56,7 @@ impl Operand {
     }
 }
 
+use crate::backend::asm::Label;
 use crate::backend::symbol::*;
 use crate::frontend::ast::*;
 

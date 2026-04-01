@@ -6,31 +6,42 @@ lazy_static! {
 }
 
 #[derive(Debug, Clone)]
-pub struct Label(String);
+pub struct Label {
+    id: u32,
+    kind: LabelKind,
+}
 
 impl Label {
-    pub fn from<T>(src: T) -> Self
-    where
-        T: std::fmt::Display,
-    {
-        Self(format!("{}", src))
+    pub const COND: &'static str = "cond";
+    pub const LOOP: &'static str = "loop";
+
+    pub fn new(kind: LabelKind) -> Self {
+        let id = Self::id();
+        Self { id, kind }
     }
 
-    pub fn fresh<T>(src: T) -> Self
-    where
-        T: std::fmt::Display,
-    {
-        Self(format!("{}_{}", src, Self::id()))
+    pub fn raw(string: &str) -> Self {
+        Self {
+            id: Self::id(),
+            kind: LabelKind::Raw(Self::sanitize(string)),
+        }
     }
 
-    pub fn unique<T>(src: T, id: u32) -> Self
-    where
-        T: std::fmt::Display,
-    {
-        Self(format!("{}_{}", src, id))
+    pub fn suffix(&self, suffix: &str) -> Label {
+        match &self.kind {
+            LabelKind::Raw(s) => Label {
+                id: self.id,
+                kind: LabelKind::Raw(format!("{}_{}", s, Self::sanitize(suffix))),
+            },
+            _ => unreachable!(),
+        }
     }
 
-    pub fn id() -> u32 {
+    fn sanitize(string: &str) -> String {
+        string.replace(|c: char| !c.is_alphanumeric() && c != '_', "_")
+    }
+
+    fn id() -> u32 {
         let mut guard = LABEL_TRACK.lock().unwrap();
         let id = *guard;
         *guard += 1;
@@ -40,14 +51,17 @@ impl Label {
 
 impl std::fmt::Display for Label {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        match &self.kind {
+            LabelKind::Raw(s) => write!(f, ":{}_{}", s, self.id),
+            label => write!(f, "{}", label),
+        }
     }
 }
 
-impl std::ops::Deref for Label {
-    type Target = String;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+#[derive(Debug, Clone, strum_macros::Display)]
+pub enum LabelKind {
+    #[strum(to_string = "{0}")]
+    Raw(String),
+    #[strum(to_string = "ipt")]
+    Ipt,
 }

@@ -4,13 +4,27 @@ pub const KW_OUT: &str = "out";
 pub const KW_IF: &str = "if";
 pub const KW_ELSE: &str = "else";
 pub const KW_FOR: &str = "for";
+pub const KW_LOOP: &str = "loop";
 pub const KW_WHILE: &str = "while";
+pub const KW_BREAK: &str = "break";
+pub const KW_RETURN: &str = "return";
+pub const KW_CONTINUE: &str = "continue";
 
 pub const KW_TRUE: &str = "true";
 pub const KW_FALSE: &str = "false";
 
-pub const RESERVED_KEYWORDS: [&str; 8] = [
-    KW_LET, KW_OUT, KW_IF, KW_ELSE, KW_FOR, KW_WHILE, KW_TRUE, KW_FALSE,
+pub const RESERVED_KEYWORDS: [&str; 11] = [
+    KW_LET,
+    KW_OUT,
+    KW_IF,
+    KW_ELSE,
+    KW_FOR,
+    KW_WHILE,
+    KW_BREAK,
+    KW_RETURN,
+    KW_CONTINUE,
+    KW_TRUE,
+    KW_FALSE,
 ];
 
 pub const CH_ADD: char = '+';
