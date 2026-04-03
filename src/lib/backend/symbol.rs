@@ -2,6 +2,7 @@ use super::mem::Location;
 use crate::{
     backend::{asm::Label, mem::Register},
     game::SignalId,
+    log,
 };
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
@@ -16,10 +17,13 @@ pub enum ScopeKind {
     For,
     While,
     Loop,
+    Function,
 }
 
 #[derive(Debug, Default, derive_builder::Builder)]
 pub struct ScopeMetadata {
+    #[builder(setter(skip = true))]
+    idx: usize,
     #[builder(setter(skip = true))]
     depth: usize,
     pub kind: ScopeKind,
@@ -29,23 +33,88 @@ pub struct ScopeMetadata {
     pub exit_label: Option<Label>,
 }
 
-#[derive(Debug, Default)]
+impl ScopeMetadata {
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+
+    pub fn idx(&self) -> usize {
+        self.idx
+    }
+}
+
+pub type ScopeId = usize;
+pub type SharedScope = Rc<RefCell<Scope>>;
+
+#[derive(Default)]
 pub struct Scope {
+    pub parent: Option<ScopeId>,
+    pub children: Vec<ScopeId>,
     pub locals: RefCell<SymbolTable>,
     pub metadata: ScopeMetadata,
 }
 
-pub type SharedScope = Rc<RefCell<Scope>>;
-
-#[derive(Debug, Default)]
-pub struct ScopeStack {
-    scopes: Vec<SharedScope>,
-    birdeye: HashMap<SymbolId, SharedSymbol>,
+impl std::fmt::Debug for Scope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(&format!("{:?} Scope", self.metadata.kind))
+            .field("parent", &self.parent)
+            .field("children", &self.children)
+            .field("metadata", &self.metadata)
+            .finish()
+    }
 }
 
-impl ScopeStack {
-    pub fn lookup_name(&self, name: &String) -> Option<SymbolHandle> {
-        for scope in self.scopes.iter().rev() {
+#[derive(Debug, Default)]
+pub struct ScopeArena {
+    scopes: Vec<SharedScope>,
+    birdeye: HashMap<SymbolId, ScopeId>,
+}
+
+impl ScopeArena {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    // resolve a symbol within a given scope based on its ident
+    pub fn resolve(&self, scope_idx: ScopeId, name: &String) -> Option<SymbolHandle> {
+        if let Some(scope) = self.scopes.get(scope_idx)
+            && let Some(sym_handle) = scope.borrow().locals.borrow().lookup_name(name)
+        {
+            return Some(sym_handle);
+        }
+
+        if let Some(parent) = self.scopes[scope_idx].borrow().parent {
+            return self.resolve(parent, name);
+        }
+
+        None
+    }
+
+    // uses the birdeye to get the symbol's scope which it uses to resolve data
+    pub fn snatch(&self, sid: &SymbolId) -> Option<SharedSymbol> {
+        if let Some(scope_id) = self.birdeye.get(&sid)
+            && let Some(scope) = self.scopes.get(*scope_id)
+        {
+            let scope = scope.borrow();
+            let table = scope.locals.borrow();
+
+            if let Some(sym) = table.get(&sid) {
+                return Some(Rc::clone(sym));
+            }
+        }
+
+        None
+    }
+
+    // looks up for a symbol based on its ident upward the global scope
+    pub fn lookup(&self, name: &String) -> Option<SymbolHandle> {
+        let current = self
+            .scopes
+            .last()
+            .expect("looking up a symbol requires a global scope")
+            .borrow();
+
+        for scope in self.ladder(current.metadata.idx()) {
             let scope = scope.borrow();
             let table = scope.locals.borrow();
             if let Some(sym_ref) = table.lookup_name(name)
@@ -58,56 +127,71 @@ impl ScopeStack {
         None
     }
 
-    pub fn ladder(&self) -> std::iter::Rev<std::slice::Iter<'_, Rc<RefCell<Scope>>>> {
-        self.scopes.iter().rev()
-    }
-
-    pub fn birdeye(&self) -> &HashMap<SymbolId, SharedSymbol> {
-        &self.birdeye
-    }
-
-    pub fn enter_scope(&mut self) -> SharedScope {
-        self.enter_scope_explicit(ScopeMetadata::default())
-    }
-
-    pub fn enter_scope_explicit(&mut self, metadata: ScopeMetadata) -> SharedScope {
-        let scope = Scope {
-            metadata: ScopeMetadata {
-                kind: if self.scopes.is_empty() {
-                    ScopeKind::Global
-                } else {
-                    metadata.kind
-                },
-                depth: self.scopes.len() + 1,
-                ..metadata
-            },
-            ..Default::default()
-        };
-
-        self.scopes.push(Rc::new(RefCell::new(scope)));
-        self.scopes.last().unwrap().clone()
-    }
-
-    pub fn leave_scope<F>(&mut self, mut callop: F)
-    where
-        F: FnMut(Rc<RefCell<Scope>>),
-    {
-        if let Some(symbol) = self.scopes.pop() {
-            callop(symbol)
-        }
-    }
-
-    pub fn bind(&mut self, sid: SymbolId, sym: Symbol) {
+    pub fn define_symbol(&mut self, sid: SymbolId, sym: Symbol) {
         if let Some(current) = self.scopes.last() {
             let current = current.borrow();
             let mut table = current.locals.borrow_mut();
             let shared_symbol = Rc::new(RefCell::new(sym));
 
-            self.birdeye.insert(sid, Rc::clone(&shared_symbol));
+            self.birdeye.insert(sid, current.metadata.idx());
             table.bind(sid, Rc::clone(&shared_symbol));
         }
     }
+
+    pub fn enter_scope_explicit(
+        &mut self,
+        parent: Option<ScopeId>,
+        metadata: ScopeMetadata,
+    ) -> SharedScope {
+        let id = self.scopes.len();
+
+        if let Some(p) = parent
+            && let Some(scope) = self.scopes.get(p)
+        {
+            // scope.borrow_mut().children.push(id)
+        }
+
+        let scope = Scope {
+            parent,
+            metadata: ScopeMetadata {
+                idx: id,
+                kind: if self.scopes.is_empty() {
+                    ScopeKind::Global
+                } else {
+                    metadata.kind
+                },
+                depth: parent
+                    .map(|p| self.scopes[p].borrow().metadata.depth + 1)
+                    .unwrap_or(0),
+                ..metadata
+            },
+            ..Default::default()
+        };
+
+        log::debug!(" {:?}:{}", scope.metadata.kind, scope.metadata.depth);
+        self.scopes.push(Rc::new(RefCell::new(scope)));
+        self.scopes.last().unwrap().clone()
+    }
+
+    pub fn enter_scope(&mut self, parent: Option<ScopeId>) -> SharedScope {
+        self.enter_scope_explicit(parent, ScopeMetadata::default())
+    }
+
+    pub fn ladder(&self, ground: ScopeId) -> Vec<SharedScope> {
+        self.scopes[0..=ground].iter().rev().cloned().collect::<_>()
+    }
+
+    pub fn leave_scope<F>(&mut self, mut callop: F)
+    where
+        F: FnMut(SharedScope),
+    {
+        if let Some(symbol) = self.scopes.pop() {
+            callop(symbol)
+        }
+    }
 }
+
+pub struct ScopeCursor {}
 
 #[derive(Debug, Clone)]
 pub struct SymbolHandle {
@@ -119,18 +203,12 @@ pub struct SymbolHandle {
 pub struct Symbol {
     pub name: String,
     pub loc: Location,
-    // pub depth: usize,
     pub signal: Option<SignalId>,
 }
 
 impl Symbol {
     pub fn new(name: String, loc: Location, signal: Option<SignalId>) -> Self {
-        Self {
-            name,
-            loc,
-            signal,
-            // depth,
-        }
+        Self { name, loc, signal }
     }
 }
 

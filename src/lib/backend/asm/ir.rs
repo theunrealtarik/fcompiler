@@ -20,7 +20,7 @@ impl std::ops::Deref for TempId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum_macros::EnumIs)]
 pub enum Operand {
-    Persistent(super::super::symbol::SymbolId),
+    Persistent(crate::backend::symbol::SymbolId),
     Temp(TempId),
     Imm(i32),
 }

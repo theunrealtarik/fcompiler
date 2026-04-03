@@ -22,7 +22,7 @@ pub struct Assembler {
     instr: Vec<Instruction>,
     code: String,
     program: Program,
-    scopes: ScopeStack,
+    scopes: ScopeArena,
     memory: MemoryManager,
     outputs: OutputManager,
 }
@@ -45,7 +45,7 @@ impl Assembler {
 
     pub fn finish(&mut self) -> Result<&str, CompileError> {
         let stmts = self.program.to_vec();
-        let global = self.scopes.enter_scope();
+        let global = self.scopes.enter_scope(None);
         self.handle_statements(stmts, global.clone())?;
 
         let instructions = self.instr.clone();
@@ -168,25 +168,6 @@ impl Assembler {
             }
         }
 
-        self.scopes.leave_scope(|scope| {
-            let scope = scope.borrow();
-            let locals = scope.locals.borrow();
-
-            if scope.metadata.kind.is_global() {
-                return;
-            }
-
-            log::warn!(" {:?} {:#?}", scope.metadata.kind, locals);
-            for sym in locals.values() {
-                match sym.borrow().loc {
-                    Location::Reg(reg) => {
-                        self.memory.free(reg);
-                    }
-                    Location::Stk(_) => todo!(),
-                }
-            }
-        });
-
         let dead_marks = self.memory.dead_marks();
         if !dead_marks.is_empty() {
             let mut clear_regs = String::new();
@@ -202,7 +183,7 @@ impl Assembler {
 
     fn ensure_location(&mut self, opr: &Operand) -> Result<Resolved, CompileError> {
         match opr {
-            Operand::Persistent(symbol_id) => match self.scopes.birdeye().get(symbol_id) {
+            Operand::Persistent(symbol_id) => match self.scopes.snatch(symbol_id) {
                 Some(sym) => {
                     let sym = sym.borrow();
                     Ok(Resolved::Reg(sym.loc.into()))
@@ -254,14 +235,36 @@ impl Assembler {
             self.handle_statement(stmt, scope.clone())?;
         }
 
+        self.scopes.leave_scope(|scope| {
+            let scope = scope.borrow();
+            let locals = scope.locals.borrow();
+
+            if scope.metadata.kind.is_global() {
+                return;
+            }
+
+            log::warn!(" {:?}:{}", scope.metadata.kind, scope.metadata.idx());
+
+            for sym in locals.values() {
+                match sym.borrow().loc {
+                    Location::Reg(reg) => {
+                        self.memory.free(reg);
+                    }
+                    Location::Stk(_) => todo!(),
+                }
+            }
+        });
+
         Ok(())
     }
 
     fn handle_statement(
         &mut self,
         stmt: StatementContext,
-        _: SharedScope,
+        current: SharedScope,
     ) -> Result<(), CompileError> {
+        let current = current.borrow();
+
         match stmt.kind {
             StatementKind::Declare { ident, sigid, expr } => {
                 let reg = self
@@ -275,7 +278,7 @@ impl Assembler {
                     .proc_expr(&expr, Some(dst))
                     .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
 
-                self.scopes.bind(SymbolId(dst.into()), var);
+                self.scopes.define_symbol(SymbolId(dst.into()), var);
 
                 if dst != opr {
                     if let Some(signal_id) = sigid
@@ -288,7 +291,7 @@ impl Assembler {
                 }
             }
             StatementKind::Assign { ident, expr } => {
-                let sid = match self.scopes.lookup_name(&ident) {
+                let sid = match self.scopes.lookup(&ident) {
                     Some(SymbolHandle { sid, .. }) => sid,
                     None => {
                         return Err(CompileError::new(
@@ -314,7 +317,7 @@ impl Assembler {
                     self.out(Operand::Imm(scalar), signal.id);
                 }
                 SignalValue::Var(ident) => {
-                    if let Some(SymbolHandle { sid, .. }) = self.scopes.lookup_name(&ident) {
+                    if let Some(SymbolHandle { sid, .. }) = self.scopes.lookup(&ident) {
                         let target = Operand::Persistent(sid);
 
                         if let Some(signal_id) = signal.id {
@@ -346,6 +349,7 @@ impl Assembler {
                 }
 
                 let then_scope = self.scopes.enter_scope_explicit(
+                    Some(current.metadata.idx()),
                     ScopeMetadataBuilder::default()
                         .kind(ScopeKind::Then)
                         .build()
@@ -372,6 +376,7 @@ impl Assembler {
                     }
 
                     let else_scope = self.scopes.enter_scope_explicit(
+                        Some(current.metadata.idx()),
                         ScopeMetadataBuilder::default()
                             .kind(ScopeKind::Else)
                             .build()
@@ -389,6 +394,7 @@ impl Assembler {
                 let loop_end = label.suffix("finish");
 
                 let loop_scope = self.scopes.enter_scope_explicit(
+                    Some(current.metadata.idx()),
                     ScopeMetadataBuilder::default()
                         .kind(ScopeKind::Loop)
                         .exit_label(loop_end.clone())
@@ -403,28 +409,16 @@ impl Assembler {
             }
             StatementKind::While { .. } => todo!(),
             StatementKind::Block { body } => {
-                let local_scope = self.scopes.enter_scope();
+                let local_scope = self.scopes.enter_scope(Some(current.metadata.idx()));
                 self.handle_statements(body, local_scope.clone())?
             }
             StatementKind::Break => {
-                for scope in self.scopes.ladder() {
-                    let exit_label = {
-                        let scope = scope.borrow();
-                        match scope.metadata.kind {
-                            ScopeKind::Global => {
-                                return Err(gen_err!(GeneratorError::InvalidInstruction {
-                                    msg: String::from("break statement not within loop")
-                                }));
-                            }
-                            ScopeKind::Loop => scope.metadata.exit_label.clone(),
-                            _ => None,
-                        }
-                    };
-
-                    if let Some(label) = exit_label {
-                        self.jump(label, None);
-                        break;
-                    }
+                let ladder = self.scopes.ladder(current.metadata.idx());
+                for scope in ladder {
+                    // if let Some(label) = exit_label {
+                    //     self.jump(label, None);
+                    //     break;
+                    // }
                 }
             }
             _ => unimplemented!(),
@@ -441,7 +435,7 @@ impl Assembler {
         match expr {
             Expression::Value(signal) => match &signal.value {
                 SignalValue::Num(n) => Ok(Operand::immediate(*n)),
-                SignalValue::Var(ident) => match self.scopes.lookup_name(ident) {
+                SignalValue::Var(ident) => match self.scopes.lookup(ident) {
                     Some(SymbolHandle { sid, .. }) => Ok(Operand::Persistent(sid)),
                     None => Err(CompileErrorKind::Semantic(
                         SemanticError::UndefinedVariable(ident.to_string()),
