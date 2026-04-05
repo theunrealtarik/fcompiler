@@ -644,10 +644,15 @@ impl Assembler {
         }
     }
 
+    // mov r1 10
+    // mov r2 1[item=copper-plate]
+    // mul r2 r1
+    // mov r1 r2
+    // clr r2
     fn cast(&mut self, target: Operand, signal_id: crate::game::SignalId) {
         let caster = Operand::temp();
         self.tape.mov_sig(caster, Operand::Imm(1), signal_id);
-        self.tape.mul(caster, target, target);
+        self.tape.mul(caster, caster, target);
         self.tape.mov(target, caster);
     }
 }
