@@ -33,7 +33,7 @@ impl IntoOptSpan for Option<Span> {
 
 pub type Block = Vec<StatementContext>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, strum_macros::EnumIs)]
 pub enum StatementKind {
     Block {
         body: Block,

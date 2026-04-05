@@ -1,4 +1,5 @@
 use lazy_static::lazy_static;
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::vec;
 
@@ -160,6 +161,25 @@ pub struct Tape {
     pub instrs: Vec<Instruction>,
 }
 
+/// Helpers
+impl Tape {
+    pub fn count_temp(&self) -> HashMap<TempId, usize> {
+        let instrs = self.instrs.iter();
+        let mut map: HashMap<TempId, usize> = HashMap::new();
+
+        for instr in instrs {
+            for src in instr.sources() {
+                if let Operand::Temp(temp_id) = src {
+                    map.entry(*temp_id).and_modify(|count| *count += 1);
+                }
+            }
+        }
+
+        map
+    }
+}
+
+/// Emitters
 impl Tape {
     /// mov: dst = src
     pub fn mov(&mut self, dst: Dst, src: Src) {

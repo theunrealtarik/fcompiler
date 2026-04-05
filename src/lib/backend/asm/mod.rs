@@ -1,14 +1,12 @@
 mod emit;
 mod ir;
-mod label;
 
 pub use emit::*;
 pub use ir::*;
-pub use label::*;
 
-use std::collections::HashMap;
 use std::ops::Deref;
 
+use super::label::*;
 use super::mem::*;
 use super::symbol::*;
 
@@ -43,190 +41,6 @@ impl Assembler {
         &self.code
     }
 
-    pub fn finish(&mut self) -> Result<&str, CompileError> {
-        let stmts = self.program.to_vec();
-        let global = self.scopes.enter_scope(None);
-        self.handle_statements(stmts, global.clone())?;
-
-        let instructions = self.tape.instrs.clone();
-        let mut tmps = Self::count_temp(&instructions);
-        println!("{:#?}", self.scopes);
-        self.code.push_str(&AsmFormatter::clr::<String>(None));
-        for (_, instr) in instructions.iter().enumerate() {
-            log::asm!("{:?}", instr);
-            let asm_line = match instr {
-                Instruction::BinOp { dst, lhs, rhs, op } => {
-                    let dst = self.ensure_location(dst)?;
-                    let lhs = self.ensure_location(lhs)?;
-                    let rhs = self.ensure_location(rhs)?;
-
-                    match (dst, lhs, rhs) {
-                        (Resolved::Reg(dst), Resolved::Reg(lhs), Resolved::Reg(rhs)) => {
-                            AsmFormatter::arith(&op.to_string(), dst, lhs, rhs)
-                        }
-                        (Resolved::Reg(dst), Resolved::Reg(r), Resolved::Imm(n)) => {
-                            AsmFormatter::arith(&op.to_string(), dst, r, n)
-                        }
-                        (Resolved::Reg(dst), Resolved::Imm(n), Resolved::Reg(r)) => {
-                            if op.is_commutative() {
-                                AsmFormatter::arith(&op.to_string(), dst, r, n)
-                            } else {
-                                AsmFormatter::arith(&op.to_string(), dst, n, r)
-                            }
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-                Instruction::UnaryOp { dst, src, op } => {
-                    let dst = self.ensure_location(dst)?;
-                    let src = self.ensure_location(src)?;
-
-                    let lhs = if dst == src { "-1" } else { &src.to_string() };
-                    let rhs = if dst == src { "" } else { "-1" };
-
-                    match op {
-                        UnaryOp::Not => AsmFormatter::not(dst, Some(src)),
-                        UnaryOp::Neg => AsmFormatter::arith("mul", dst, lhs, rhs),
-                    }
-                }
-                Instruction::Mov { dst, src } => {
-                    let dst = self.ensure_location(dst)?;
-                    let src = self.ensure_location(src)?;
-                    AsmFormatter::mov(dst, src)
-                }
-                Instruction::MovSig {
-                    dst,
-                    src,
-                    signal_id,
-                } => {
-                    let dst = self.ensure_location(dst)?;
-                    let src = self.ensure_location(src)?;
-
-                    if !src.is_imm() {
-                        return Err(CompileError::new(
-                            CompileErrorKind::Generation(GeneratorError::RegisterCannotBeTyped),
-                            None,
-                        ));
-                    }
-
-                    AsmFormatter::mov(dst, format!("{}{}", src, signal_id.format()))
-                }
-                Instruction::Out { src, signal_id } => {
-                    let src = self.ensure_location(src)?;
-                    let item = format!(
-                        "{}{}",
-                        src,
-                        signal_id.map(|s| s.format()).unwrap_or_default()
-                    );
-                    AsmFormatter::mov(self.outputs.out(), item)
-                }
-                Instruction::Nop => String::new(),
-                Instruction::Inc { dst } => {
-                    let dst = self.ensure_location(dst)?;
-                    AsmFormatter::inc(dst)
-                }
-                Instruction::Dec { dst } => {
-                    let dst = self.ensure_location(dst)?;
-                    AsmFormatter::dec(dst)
-                }
-                Instruction::Compare { a, b, op, addr } => {
-                    let lhs = self.ensure_location(a)?;
-                    let rhs = self.ensure_location(b)?;
-
-                    if let Some(addr) = addr {
-                        AsmFormatter::branch(&op.branch_op(), lhs, rhs, addr)
-                    } else {
-                        AsmFormatter::test(&op.test_op(), lhs, rhs)
-                    }
-                }
-                Instruction::Label { name } => AsmFormatter::label(name.to_string()),
-                Instruction::Jump { addr, offset } => AsmFormatter::jmp(
-                    addr,
-                    if let Some(offset) = offset {
-                        offset.to_string()
-                    } else {
-                        "".to_string()
-                    },
-                ),
-                Instruction::Event(context) => {
-                    match context {
-                        EventContext::ScopeEntered { scope_idx } => {
-                            if let Some(scope) = self.scopes.get(*scope_idx) {
-                                let scope = scope.borrow();
-                                log::warn!(" {:?}:{}", scope.metadata.kind, scope.metadata.idx());
-                            }
-                        }
-                        EventContext::ScopeDropped { scope_idx } => {
-                            if let Some(scope) = self.scopes.drop_scope(scope_idx) {
-                                let scope = scope.borrow();
-                                let locals = scope.locals.borrow();
-
-                                if scope.metadata.kind.is_global() {
-                                    continue;
-                                }
-
-                                log::warn!(" {:?}:{}", scope.metadata.kind, scope.metadata.idx());
-                                for sym in locals.values() {
-                                    match sym.borrow().loc {
-                                        Location::Reg(reg) => {
-                                            self.memory.free(reg);
-                                        }
-                                        Location::Stk(_) => todo!(),
-                                    }
-                                }
-                            }
-                        }
-                        EventContext::Free { oprs } => {
-                            let mut regs = Vec::new();
-                            for opr in oprs {
-                                regs.push(self.ensure_location(opr)?);
-                            }
-
-                            let mut clear_regs = String::new();
-                            for r in regs {
-                                clear_regs.push_str(&format!("{} ", r));
-                            }
-
-                            self.code.push_str(&AsmFormatter::clr(Some(clear_regs)));
-                        }
-                    }
-
-                    String::new()
-                }
-            };
-
-            if !asm_line.is_empty() {
-                self.code.push_str(&asm_line);
-            }
-
-            for src in instr.sources() {
-                if let Operand::Temp(temp_id) = src
-                    && let Some(count) = tmps.get_mut(temp_id)
-                {
-                    *count -= 1;
-                    if *count == 0
-                        && let Some(reg) = self.memory.temps.remove(temp_id)
-                    {
-                        self.memory.free(reg);
-                        log::warn!("Freed {:?} ← {:?}", reg, temp_id);
-                    }
-                }
-            }
-        }
-
-        let dead_marks = self.memory.dead_marks();
-        if !dead_marks.is_empty() {
-            let mut clear_regs = String::new();
-            for dead_reg in dead_marks {
-                clear_regs.push_str(&format!("{} ", dead_reg));
-            }
-
-            self.code.push_str(&AsmFormatter::clr(Some(clear_regs)));
-        }
-
-        Ok(&self.code)
-    }
-
     fn ensure_location(&mut self, opr: &Operand) -> Result<Resolved, CompileError> {
         match opr {
             Operand::Persistent(sid) => match self.scopes.snatch(sid) {
@@ -259,19 +73,6 @@ impl Assembler {
             }
             Operand::Imm(n) => Ok(Resolved::Imm(*n)),
         }
-    }
-
-    fn count_temp(instr: &[Instruction]) -> HashMap<&TempId, u32> {
-        let mut map: HashMap<&TempId, u32> = HashMap::new();
-        for intr in instr.iter() {
-            for opr in intr.sources() {
-                if let Operand::Temp(id) = opr {
-                    map.entry(id).and_modify(|count| *count += 1).or_insert(1);
-                }
-            }
-        }
-
-        map
     }
 
     fn handle_statements(
@@ -312,9 +113,6 @@ impl Assembler {
                     .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
 
                 self.scopes.define_symbol(SymbolId(dst.into()), var);
-
-                // self.scopes
-                //     .define_symbol(current.metadata.idx(), SymbolId(dst.into()), var);
 
                 if dst != opr {
                     if let Some(signal_id) = sigid
@@ -392,7 +190,7 @@ impl Assembler {
                         .unwrap(),
                 );
 
-                if is_singular_instr {
+                if is_singular_instr && !then.first().map(|i| i.kind.is_out()).unwrap_or_default() {
                     self.tape.test_ne(dst, Operand::Imm(0));
                     self.handle_statements(then, then_scope.clone())?;
                     // self.tape.jump(Label::new(LabelKind::Ipt), Some(2));
@@ -644,15 +442,194 @@ impl Assembler {
         }
     }
 
-    // mov r1 10
-    // mov r2 1[item=copper-plate]
-    // mul r2 r1
-    // mov r1 r2
-    // clr r2
     fn cast(&mut self, target: Operand, signal_id: crate::game::SignalId) {
         let caster = Operand::temp();
         self.tape.mov_sig(caster, Operand::Imm(1), signal_id);
         self.tape.mul(caster, caster, target);
         self.tape.mov(target, caster);
+    }
+
+    pub fn finish(&mut self) -> Result<&str, CompileError> {
+        let stmts = self.program.to_vec();
+        let global = self.scopes.enter_scope(None);
+        self.handle_statements(stmts, global.clone())?;
+
+        let instructions = self.tape.instrs.clone();
+        let mut tmps = self.tape.count_temp();
+
+        self.code.push_str(&AsmFormatter::clr::<String>(None));
+        for (_, instr) in instructions.iter().enumerate() {
+            log::asm!("{:?}", instr);
+            let asm_line = match instr {
+                Instruction::BinOp { dst, lhs, rhs, op } => {
+                    let dst = self.ensure_location(dst)?;
+                    let lhs = self.ensure_location(lhs)?;
+                    let rhs = self.ensure_location(rhs)?;
+
+                    match (dst, lhs, rhs) {
+                        (Resolved::Reg(dst), Resolved::Reg(lhs), Resolved::Reg(rhs)) => {
+                            AsmFormatter::arith(&op.to_string(), dst, lhs, rhs)
+                        }
+                        (Resolved::Reg(dst), Resolved::Reg(r), Resolved::Imm(n)) => {
+                            AsmFormatter::arith(&op.to_string(), dst, r, n)
+                        }
+                        (Resolved::Reg(dst), Resolved::Imm(n), Resolved::Reg(r)) => {
+                            if op.is_commutative() {
+                                AsmFormatter::arith(&op.to_string(), dst, r, n)
+                            } else {
+                                AsmFormatter::arith(&op.to_string(), dst, n, r)
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                Instruction::UnaryOp { dst, src, op } => {
+                    let dst = self.ensure_location(dst)?;
+                    let src = self.ensure_location(src)?;
+
+                    let lhs = if dst == src { "-1" } else { &src.to_string() };
+                    let rhs = if dst == src { "" } else { "-1" };
+
+                    match op {
+                        UnaryOp::Not => AsmFormatter::not(dst, Some(src)),
+                        UnaryOp::Neg => AsmFormatter::arith("mul", dst, lhs, rhs),
+                    }
+                }
+                Instruction::Mov { dst, src } => {
+                    let dst = self.ensure_location(dst)?;
+                    let src = self.ensure_location(src)?;
+                    AsmFormatter::mov(dst, src)
+                }
+                Instruction::MovSig {
+                    dst,
+                    src,
+                    signal_id,
+                } => {
+                    let dst = self.ensure_location(dst)?;
+                    let src = self.ensure_location(src)?;
+
+                    if !src.is_imm() {
+                        return Err(CompileError::new(
+                            CompileErrorKind::Generation(GeneratorError::RegisterCannotBeTyped),
+                            None,
+                        ));
+                    }
+
+                    AsmFormatter::mov(dst, format!("{}{}", src, signal_id.format()))
+                }
+                Instruction::Out { src, signal_id } => {
+                    let src = self.ensure_location(src)?;
+                    let item = format!(
+                        "{}{}",
+                        src,
+                        signal_id.map(|s| s.format()).unwrap_or_default()
+                    );
+                    AsmFormatter::mov(self.outputs.out(), item)
+                }
+                Instruction::Nop => String::new(),
+                Instruction::Inc { dst } => {
+                    let dst = self.ensure_location(dst)?;
+                    AsmFormatter::inc(dst)
+                }
+                Instruction::Dec { dst } => {
+                    let dst = self.ensure_location(dst)?;
+                    AsmFormatter::dec(dst)
+                }
+                Instruction::Compare { a, b, op, addr } => {
+                    let lhs = self.ensure_location(a)?;
+                    let rhs = self.ensure_location(b)?;
+
+                    if let Some(addr) = addr {
+                        AsmFormatter::branch(&op.branch_op(), lhs, rhs, addr)
+                    } else {
+                        AsmFormatter::test(&op.test_op(), lhs, rhs)
+                    }
+                }
+                Instruction::Label { name } => AsmFormatter::label(name.to_string()),
+                Instruction::Jump { addr, offset } => AsmFormatter::jmp(
+                    addr,
+                    if let Some(offset) = offset {
+                        offset.to_string()
+                    } else {
+                        "".to_string()
+                    },
+                ),
+                Instruction::Event(context) => {
+                    match context {
+                        EventContext::ScopeEntered { scope_idx } => {
+                            if let Some(scope) = self.scopes.get(*scope_idx) {
+                                let scope = scope.borrow();
+                                log::warn!(" {:?}:{}", scope.metadata.kind, scope.metadata.idx());
+                            }
+                        }
+                        EventContext::ScopeDropped { scope_idx } => {
+                            if let Some(scope) = self.scopes.drop_scope(scope_idx) {
+                                let scope = scope.borrow();
+                                let locals = scope.locals.borrow();
+
+                                if scope.metadata.kind.is_global() {
+                                    continue;
+                                }
+
+                                log::warn!(" {:?}:{}", scope.metadata.kind, scope.metadata.idx());
+                                for sym in locals.values() {
+                                    match sym.borrow().loc {
+                                        Location::Reg(reg) => {
+                                            self.memory.free(reg);
+                                        }
+                                        Location::Stk(_) => todo!(),
+                                    }
+                                }
+                            }
+                        }
+                        EventContext::Free { oprs } => {
+                            let mut regs = Vec::new();
+                            for opr in oprs {
+                                regs.push(self.ensure_location(opr)?);
+                            }
+
+                            let mut clear_regs = String::new();
+                            for r in regs {
+                                clear_regs.push_str(&format!("{} ", r));
+                            }
+
+                            self.code.push_str(&AsmFormatter::clr(Some(clear_regs)));
+                        }
+                    }
+
+                    String::new()
+                }
+            };
+
+            if !asm_line.is_empty() {
+                self.code.push_str(&asm_line);
+            }
+
+            for src in instr.sources() {
+                if let Operand::Temp(temp_id) = src
+                    && let Some(count) = tmps.get_mut(temp_id)
+                {
+                    *count -= 1;
+                    if *count == 0
+                        && let Some(reg) = self.memory.temps.remove(temp_id)
+                    {
+                        self.memory.free(reg);
+                        log::warn!("Freed {:?} ← {:?}", reg, temp_id);
+                    }
+                }
+            }
+        }
+
+        let dead_marks = self.memory.dead_marks();
+        if !dead_marks.is_empty() {
+            let mut clear_regs = String::new();
+            for dead_reg in dead_marks {
+                clear_regs.push_str(&format!("{} ", dead_reg));
+            }
+
+            self.code.push_str(&AsmFormatter::clr(Some(clear_regs)));
+        }
+
+        Ok(&self.code)
     }
 }

@@ -8,3 +8,7 @@ if x > y {
     let c: CopperPlate = 1024;
     out(c);
 }
+
+if x < y {
+    out(x: PlasticBar);
+}

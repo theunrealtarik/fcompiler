@@ -1,8 +1,7 @@
-use super::mem::Location;
-use crate::{
-    backend::{asm::Label, mem::Register},
-    game::SignalId,
-};
+use super::label::*;
+use super::mem::{Location, Register};
+use crate::game::SignalId;
+use crate::log;
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
@@ -174,7 +173,7 @@ impl ScopeArena {
 
         if let Some(p) = parent {
             if let Some(scope_rc) = self.table.get(&p) {
-                // scope_rc.borrow_mut().children.push(id);
+                scope_rc.borrow_mut().children.push(idx);
             }
         }
 
