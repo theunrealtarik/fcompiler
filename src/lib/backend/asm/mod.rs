@@ -50,7 +50,7 @@ impl Assembler {
 
         let instructions = self.tape.instrs.clone();
         let mut tmps = Self::count_temp(&instructions);
-
+        println!("{:#?}", self.scopes);
         self.code.push_str(&AsmFormatter::clr::<String>(None));
         for (_, instr) in instructions.iter().enumerate() {
             log::asm!("{:?}", instr);
@@ -395,7 +395,7 @@ impl Assembler {
                 if is_singular_instr {
                     self.tape.test_ne(dst, Operand::Imm(0));
                     self.handle_statements(then, then_scope.clone())?;
-                    self.tape.jump(Label::new(LabelKind::Ipt), Some(2));
+                    // self.tape.jump(Label::new(LabelKind::Ipt), Some(2));
                 } else {
                     self.tape
                         .br_eq(dst, Operand::Imm(0), label_suffixed.clone());
@@ -406,6 +406,8 @@ impl Assembler {
 
                     self.tape.label(label_suffixed.clone());
                 }
+
+                self.scopes.leave_scope();
 
                 if let Some(alter) = alter {
                     if alter.is_empty() {
@@ -423,6 +425,8 @@ impl Assembler {
                     if !is_singular_instr {
                         self.tape.label(label.suffix("end"))
                     }
+
+                    self.scopes.leave_scope();
                 }
             }
             StatementKind::Loop { body } => {
@@ -443,6 +447,8 @@ impl Assembler {
                 self.handle_statements(body, loop_scope.clone())?;
                 self.tape.jump(loop_start, None);
                 self.tape.label(loop_end);
+
+                self.scopes.leave_scope();
             }
             StatementKind::While { .. } => todo!(),
             StatementKind::Block { body } => {
