@@ -36,7 +36,7 @@ impl AsmFormatter {
         R: std::fmt::Display,
         A: std::fmt::Display,
     {
-        format!("{} {} {} :{}\n", op, lhs, rhs, addr)
+        format!("{} {} {} {}\n", op, lhs, rhs, addr)
     }
 
     pub fn branch_test<L, R, A>(op: &str, lhs: L, rhs: R, label: A) -> String

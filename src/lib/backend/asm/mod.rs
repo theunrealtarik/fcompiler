@@ -398,7 +398,7 @@ impl Assembler {
                     self.tape.jump(Label::new(LabelKind::Ipt), Some(2));
                 } else {
                     self.tape
-                        .br_ne(dst, Operand::Imm(0), label_suffixed.clone());
+                        .br_eq(dst, Operand::Imm(0), label_suffixed.clone());
                     self.handle_statements(then, then_scope.clone())?;
                     if alter.is_some() {
                         self.tape.jump(label.suffix("end"), None);
@@ -450,15 +450,7 @@ impl Assembler {
                 self.handle_statements(body, local_scope)?;
                 self.scopes.leave_scope();
             }
-            StatementKind::Break => {
-                let ladder = self.scopes.ladder(parent.metadata.idx());
-                for scope in ladder {
-                    // if let Some(label) = exit_label {
-                    //     self.jump(label, None);
-                    //     break;
-                    // }
-                }
-            }
+            StatementKind::Break => {}
             _ => unimplemented!(),
         }
 
