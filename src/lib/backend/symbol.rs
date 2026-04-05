@@ -2,7 +2,6 @@ use super::mem::Location;
 use crate::{
     backend::{asm::Label, mem::Register},
     game::SignalId,
-    log,
 };
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
@@ -60,14 +59,17 @@ impl std::fmt::Debug for Scope {
             .field("parent", &self.parent)
             .field("children", &self.children)
             .field("metadata", &self.metadata)
+            .field("locals", &self.locals)
             .finish()
     }
 }
 
 #[derive(Debug, Default)]
 pub struct ScopeArena {
-    scopes: Vec<SharedScope>,
+    stack: Vec<ScopeId>,
+    table: HashMap<ScopeId, SharedScope>,
     birdeye: HashMap<SymbolId, ScopeId>,
+    current: usize,
 }
 
 impl ScopeArena {
@@ -75,15 +77,29 @@ impl ScopeArena {
         Self::default()
     }
 
+    pub fn get(&self, scope_idx: ScopeId) -> Option<&SharedScope> {
+        self.table.get(&scope_idx)
+    }
+
+    pub fn last(&self) -> Option<&SharedScope> {
+        self.stack.last().and_then(|id| self.table.get(id))
+    }
+
+    pub fn current(&self) -> Option<SharedScope> {
+        self.table.get(&self.current).cloned()
+    }
+
     // resolve a symbol within a given scope based on its ident
     pub fn resolve(&self, scope_idx: ScopeId, name: &String) -> Option<SymbolHandle> {
-        if let Some(scope) = self.scopes.get(scope_idx)
+        if let Some(scope) = self.table.get(&scope_idx)
             && let Some(sym_handle) = scope.borrow().locals.borrow().lookup_name(name)
         {
             return Some(sym_handle);
         }
 
-        if let Some(parent) = self.scopes[scope_idx].borrow().parent {
+        if let Some(scope) = self.table.get(&scope_idx)
+            && let Some(parent) = scope.borrow().parent
+        {
             return self.resolve(parent, name);
         }
 
@@ -93,7 +109,7 @@ impl ScopeArena {
     // uses the birdeye to get the symbol's scope which it uses to resolve data
     pub fn snatch(&self, sid: &SymbolId) -> Option<SharedSymbol> {
         if let Some(scope_id) = self.birdeye.get(&sid)
-            && let Some(scope) = self.scopes.get(*scope_id)
+            && let Some(scope) = self.table.get(&scope_id)
         {
             let scope = scope.borrow();
             let table = scope.locals.borrow();
@@ -106,21 +122,31 @@ impl ScopeArena {
         None
     }
 
-    // looks up for a symbol based on its ident upward the global scope
     pub fn lookup(&self, name: &String) -> Option<SymbolHandle> {
-        let current = self
-            .scopes
+        let mut idx = *self
+            .stack
             .last()
-            .expect("looking up a symbol requires a global scope")
-            .borrow();
+            .expect("looking up a symbol requires a global scope");
 
-        for scope in self.ladder(current.metadata.idx()) {
-            let scope = scope.borrow();
-            let table = scope.locals.borrow();
-            if let Some(sym_ref) = table.lookup_name(name)
-                && &sym_ref.sym.borrow().name == name
-            {
-                return Some(sym_ref);
+        loop {
+            let scope = match self.table.get(&idx) {
+                Some(s) => s,
+                None => break,
+            };
+
+            let scope_ref = scope.borrow();
+            let table = scope_ref.locals.borrow();
+
+            match table.lookup_name(name) {
+                Some(sym_handle) if &sym_handle.sym.borrow().name == name => {
+                    return Some(sym_handle);
+                }
+                _ => {}
+            }
+
+            match scope_ref.parent {
+                Some(parent) if parent != idx => idx = parent,
+                _ => break,
             }
         }
 
@@ -128,12 +154,12 @@ impl ScopeArena {
     }
 
     pub fn define_symbol(&mut self, sid: SymbolId, sym: Symbol) {
-        if let Some(current) = self.scopes.last() {
-            let current = current.borrow();
-            let mut table = current.locals.borrow_mut();
+        if let Some(scope) = self.current() {
             let shared_symbol = Rc::new(RefCell::new(sym));
+            let scope = scope.borrow();
+            let mut table = scope.locals.borrow_mut();
 
-            self.birdeye.insert(sid, current.metadata.idx());
+            self.birdeye.insert(sid, scope.metadata.idx());
             table.bind(sid, Rc::clone(&shared_symbol));
         }
     }
@@ -143,55 +169,67 @@ impl ScopeArena {
         parent: Option<ScopeId>,
         metadata: ScopeMetadata,
     ) -> SharedScope {
-        let id = self.scopes.len();
+        let idx = self.stack.len();
+        self.current = idx;
 
-        if let Some(p) = parent
-            && let Some(scope) = self.scopes.get(p)
-        {
-            // scope.borrow_mut().children.push(id)
+        if let Some(p) = parent {
+            if let Some(scope_rc) = self.table.get(&p) {
+                // scope_rc.borrow_mut().children.push(id);
+            }
         }
+
+        let depth = parent
+            .map(|p| {
+                self.table
+                    .get(&p)
+                    .map(|s| s.borrow().metadata.depth + 1)
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
 
         let scope = Scope {
             parent,
             metadata: ScopeMetadata {
-                idx: id,
-                kind: if self.scopes.is_empty() {
+                idx,
+                kind: if self.stack.is_empty() {
                     ScopeKind::Global
                 } else {
                     metadata.kind
                 },
-                depth: parent
-                    .map(|p| self.scopes[p].borrow().metadata.depth + 1)
-                    .unwrap_or(0),
+                depth,
                 ..metadata
             },
             ..Default::default()
         };
 
-        log::debug!(" {:?}:{}", scope.metadata.kind, scope.metadata.depth);
-        self.scopes.push(Rc::new(RefCell::new(scope)));
-        self.scopes.last().unwrap().clone()
+        self.stack.push(idx);
+        self.table.insert(idx, Rc::new(RefCell::new(scope)));
+        self.last().unwrap().clone()
     }
 
     pub fn enter_scope(&mut self, parent: Option<ScopeId>) -> SharedScope {
         self.enter_scope_explicit(parent, ScopeMetadata::default())
     }
 
-    pub fn ladder(&self, ground: ScopeId) -> Vec<SharedScope> {
-        self.scopes[0..=ground].iter().rev().cloned().collect::<_>()
+    pub fn leave_scope(&mut self) {
+        self.current -= 1;
     }
 
-    pub fn leave_scope<F>(&mut self, mut callop: F)
-    where
-        F: FnMut(SharedScope),
-    {
-        if let Some(symbol) = self.scopes.pop() {
-            callop(symbol)
-        }
+    pub fn drop_scope(&mut self, scope_idx: &ScopeId) -> Option<SharedScope> {
+        self.table.remove(scope_idx)
+    }
+
+    pub fn ladder(&self, ground: ScopeId) -> Vec<SharedScope> {
+        self.stack[0..=ground]
+            .iter()
+            .rev()
+            .collect::<Vec<&ScopeId>>()
+            .into_iter()
+            .filter_map(|scope_idx| self.table.get(scope_idx))
+            .cloned()
+            .collect::<Vec<_>>()
     }
 }
-
-pub struct ScopeCursor {}
 
 #[derive(Debug, Clone)]
 pub struct SymbolHandle {

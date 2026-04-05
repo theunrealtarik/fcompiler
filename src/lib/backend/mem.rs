@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use crate::log;
-
 // channeling
 
 pub enum MemoryChannel {
@@ -199,7 +197,7 @@ impl Location {
     }
 }
 
-#[derive(PartialEq, Eq, Debug, strum_macros::EnumIs)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, strum_macros::EnumIs)]
 pub enum Resolved {
     Reg(Register),
     Imm(i32),

@@ -19,7 +19,7 @@ use crate::log;
 
 #[derive(Default)]
 pub struct Assembler {
-    instr: Vec<Instruction>,
+    tape: Tape,
     code: String,
     program: Program,
     scopes: ScopeArena,
@@ -36,7 +36,7 @@ impl Assembler {
     }
 
     pub fn instructions(&self) -> &Vec<Instruction> {
-        &self.instr
+        &self.tape.instrs
     }
 
     pub fn code(&self) -> &String {
@@ -48,11 +48,11 @@ impl Assembler {
         let global = self.scopes.enter_scope(None);
         self.handle_statements(stmts, global.clone())?;
 
-        let instructions = self.instr.clone();
+        let instructions = self.tape.instrs.clone();
         let mut tmps = Self::count_temp(&instructions);
 
         self.code.push_str(&AsmFormatter::clr::<String>(None));
-        for instr in instructions.iter() {
+        for (_, instr) in instructions.iter().enumerate() {
             log::asm!("{:?}", instr);
             let asm_line = match instr {
                 Instruction::BinOp { dst, lhs, rhs, op } => {
@@ -139,7 +139,6 @@ impl Assembler {
                         AsmFormatter::test(&op.test_op(), lhs, rhs)
                     }
                 }
-                Instruction::TestType { .. } => todo!(),
                 Instruction::Label { name } => AsmFormatter::label(name.to_string()),
                 Instruction::Jump { addr, offset } => AsmFormatter::jmp(
                     addr,
@@ -149,20 +148,67 @@ impl Assembler {
                         "".to_string()
                     },
                 ),
+                Instruction::Event(context) => {
+                    match context {
+                        EventContext::ScopeEntered { scope_idx } => {
+                            if let Some(scope) = self.scopes.get(*scope_idx) {
+                                let scope = scope.borrow();
+                                log::warn!(" {:?}:{}", scope.metadata.kind, scope.metadata.idx());
+                            }
+                        }
+                        EventContext::ScopeDropped { scope_idx } => {
+                            if let Some(scope) = self.scopes.drop_scope(scope_idx) {
+                                let scope = scope.borrow();
+                                let locals = scope.locals.borrow();
+
+                                if scope.metadata.kind.is_global() {
+                                    continue;
+                                }
+
+                                log::warn!(" {:?}:{}", scope.metadata.kind, scope.metadata.idx());
+                                for sym in locals.values() {
+                                    match sym.borrow().loc {
+                                        Location::Reg(reg) => {
+                                            self.memory.free(reg);
+                                        }
+                                        Location::Stk(_) => todo!(),
+                                    }
+                                }
+                            }
+                        }
+                        EventContext::Free { oprs } => {
+                            let mut regs = Vec::new();
+                            for opr in oprs {
+                                regs.push(self.ensure_location(opr)?);
+                            }
+
+                            let mut clear_regs = String::new();
+                            for r in regs {
+                                clear_regs.push_str(&format!("{} ", r));
+                            }
+
+                            self.code.push_str(&AsmFormatter::clr(Some(clear_regs)));
+                        }
+                    }
+
+                    String::new()
+                }
             };
 
-            self.code.push_str(&asm_line);
+            if !asm_line.is_empty() {
+                self.code.push_str(&asm_line);
+            }
+
             for src in instr.sources() {
                 if let Operand::Temp(temp_id) = src
                     && let Some(count) = tmps.get_mut(temp_id)
                 {
                     *count -= 1;
                     if *count == 0
-                        && let Some(_reg) = self.memory.temps.remove(temp_id)
+                        && let Some(reg) = self.memory.temps.remove(temp_id)
                     {
-                        // self.code.push_str(&AsmFormatter::clr(Some(reg))); // temp fix: using regs marked as free
-                        // self.memory.free(reg);
-                        // log::warn!("Freed {:?} ← {:?}", reg, temp_id);
+                        self.memory.free(reg);
+                        log::warn!("Freed {:?} ← {:?}", reg, temp_id);
                     }
                 }
             }
@@ -183,13 +229,15 @@ impl Assembler {
 
     fn ensure_location(&mut self, opr: &Operand) -> Result<Resolved, CompileError> {
         match opr {
-            Operand::Persistent(symbol_id) => match self.scopes.snatch(symbol_id) {
+            Operand::Persistent(sid) => match self.scopes.snatch(sid) {
                 Some(sym) => {
                     let sym = sym.borrow();
                     Ok(Resolved::Reg(sym.loc.into()))
                 }
                 None => Err(CompileError::new(
-                    CompileErrorKind::Generation(GeneratorError::NonAddressableSymbol),
+                    CompileErrorKind::Generation(GeneratorError::NonAddressableSymbol {
+                        ctx: sid.to_string(),
+                    }),
                     None,
                 )),
             },
@@ -231,39 +279,24 @@ impl Assembler {
         stmts: Vec<StatementContext>,
         scope: SharedScope,
     ) -> Result<(), CompileError> {
+        let current = scope.borrow();
+        let scope_idx = current.metadata.idx();
+        self.tape.event_scope_enter(scope_idx);
+
         for stmt in stmts {
             self.handle_statement(stmt, scope.clone())?;
         }
 
-        self.scopes.leave_scope(|scope| {
-            let scope = scope.borrow();
-            let locals = scope.locals.borrow();
-
-            if scope.metadata.kind.is_global() {
-                return;
-            }
-
-            log::warn!(" {:?}:{}", scope.metadata.kind, scope.metadata.idx());
-
-            for sym in locals.values() {
-                match sym.borrow().loc {
-                    Location::Reg(reg) => {
-                        self.memory.free(reg);
-                    }
-                    Location::Stk(_) => todo!(),
-                }
-            }
-        });
-
+        self.tape.event_scope_drop(scope_idx);
         Ok(())
     }
 
     fn handle_statement(
         &mut self,
         stmt: StatementContext,
-        current: SharedScope,
+        parent: SharedScope,
     ) -> Result<(), CompileError> {
-        let current = current.borrow();
+        let parent = parent.borrow();
 
         match stmt.kind {
             StatementKind::Declare { ident, sigid, expr } => {
@@ -280,13 +313,16 @@ impl Assembler {
 
                 self.scopes.define_symbol(SymbolId(dst.into()), var);
 
+                // self.scopes
+                //     .define_symbol(current.metadata.idx(), SymbolId(dst.into()), var);
+
                 if dst != opr {
                     if let Some(signal_id) = sigid
                         && opr.is_imm()
                     {
-                        self.mov_sig(dst, opr, signal_id);
+                        self.tape.mov_sig(dst, opr, signal_id);
                     } else {
-                        self.mov(dst, opr);
+                        self.tape.mov(dst, opr);
                     }
                 }
             }
@@ -309,12 +345,12 @@ impl Assembler {
                     .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
 
                 if opr != dst {
-                    self.mov(dst, opr);
+                    self.tape.mov(dst, opr);
                 }
             }
             StatementKind::Out(signal) => match signal.value {
                 SignalValue::Num(scalar) => {
-                    self.out(Operand::Imm(scalar), signal.id);
+                    self.tape.out(Operand::Imm(scalar), signal.id);
                 }
                 SignalValue::Var(ident) => {
                     if let Some(SymbolHandle { sid, .. }) = self.scopes.lookup(&ident) {
@@ -324,7 +360,7 @@ impl Assembler {
                             self.cast(target, signal_id);
                         }
 
-                        self.out(target, signal.id);
+                        self.tape.out(target, signal.id);
                     } else {
                         return Err(CompileError::new(
                             CompileErrorKind::Semantic(SemanticError::UndefinedVariable(
@@ -349,7 +385,7 @@ impl Assembler {
                 }
 
                 let then_scope = self.scopes.enter_scope_explicit(
-                    Some(current.metadata.idx()),
+                    Some(parent.metadata.idx()),
                     ScopeMetadataBuilder::default()
                         .kind(ScopeKind::Then)
                         .build()
@@ -357,17 +393,18 @@ impl Assembler {
                 );
 
                 if is_singular_instr {
-                    self.test_ne(dst, Operand::Imm(0));
+                    self.tape.test_ne(dst, Operand::Imm(0));
                     self.handle_statements(then, then_scope.clone())?;
-                    self.jump(Label::new(LabelKind::Ipt), Some(1));
+                    self.tape.jump(Label::new(LabelKind::Ipt), Some(2));
                 } else {
-                    self.br_ne(dst, Operand::Imm(1), label_suffixed.clone());
+                    self.tape
+                        .br_ne(dst, Operand::Imm(0), label_suffixed.clone());
                     self.handle_statements(then, then_scope.clone())?;
                     if alter.is_some() {
-                        self.jump(label.suffix("end"), None);
+                        self.tape.jump(label.suffix("end"), None);
                     }
 
-                    self.label(label_suffixed.clone());
+                    self.tape.label(label_suffixed.clone());
                 }
 
                 if let Some(alter) = alter {
@@ -376,7 +413,7 @@ impl Assembler {
                     }
 
                     let else_scope = self.scopes.enter_scope_explicit(
-                        Some(current.metadata.idx()),
+                        Some(parent.metadata.idx()),
                         ScopeMetadataBuilder::default()
                             .kind(ScopeKind::Else)
                             .build()
@@ -384,7 +421,7 @@ impl Assembler {
                     );
                     self.handle_statements(alter, else_scope.clone())?;
                     if !is_singular_instr {
-                        self.label(label.suffix("end"))
+                        self.tape.label(label.suffix("end"))
                     }
                 }
             }
@@ -394,7 +431,7 @@ impl Assembler {
                 let loop_end = label.suffix("finish");
 
                 let loop_scope = self.scopes.enter_scope_explicit(
-                    Some(current.metadata.idx()),
+                    Some(parent.metadata.idx()),
                     ScopeMetadataBuilder::default()
                         .kind(ScopeKind::Loop)
                         .exit_label(loop_end.clone())
@@ -402,18 +439,19 @@ impl Assembler {
                         .unwrap(),
                 );
 
-                self.label(loop_start.clone());
+                self.tape.label(loop_start.clone());
                 self.handle_statements(body, loop_scope.clone())?;
-                self.jump(loop_start, None);
-                self.label(loop_end);
+                self.tape.jump(loop_start, None);
+                self.tape.label(loop_end);
             }
             StatementKind::While { .. } => todo!(),
             StatementKind::Block { body } => {
-                let local_scope = self.scopes.enter_scope(Some(current.metadata.idx()));
-                self.handle_statements(body, local_scope.clone())?
+                let local_scope = self.scopes.enter_scope(Some(parent.metadata.idx()));
+                self.handle_statements(body, local_scope)?;
+                self.scopes.leave_scope();
             }
             StatementKind::Break => {
-                let ladder = self.scopes.ladder(current.metadata.idx());
+                let ladder = self.scopes.ladder(parent.metadata.idx());
                 for scope in ladder {
                     // if let Some(label) = exit_label {
                     //     self.jump(label, None);
@@ -460,7 +498,7 @@ impl Assembler {
                     if let Operand::Imm(n) = opr {
                         return Ok(Operand::Imm(-n));
                     } else {
-                        self.neg(dst, opr);
+                        self.tape.neg(dst, opr);
                     }
 
                     Ok(dst)
@@ -468,7 +506,7 @@ impl Assembler {
                 UnaryOp::Not => {
                     let dst = p_dst.unwrap_or(Operand::temp());
                     let src = self.proc_expr(expr, Some(dst))?;
-                    self.not(dst, src);
+                    self.tape.not(dst, src);
                     Ok(dst)
                 }
             },
@@ -536,9 +574,9 @@ impl Assembler {
                     && n == 1
                     && (dst == src)
                 {
-                    self.inc(dst);
+                    self.tape.inc(dst);
                 } else {
-                    self.add(dst, src, val);
+                    self.tape.add(dst, src, val);
                 }
             }
             BinOp::Sub => {
@@ -546,14 +584,14 @@ impl Assembler {
                     && n == 1
                     && (dst == src)
                 {
-                    self.dec(dst);
+                    self.tape.dec(dst);
                 } else {
-                    self.sub(dst, src, val);
+                    self.tape.sub(dst, src, val);
                 }
             }
-            BinOp::Mul => self.mul(dst, src, val),
-            BinOp::Div => self.div(dst, src, val),
-            BinOp::Mod => self.modu(dst, src, val),
+            BinOp::Mul => self.tape.mul(dst, src, val),
+            BinOp::Div => self.tape.div(dst, src, val),
+            BinOp::Mod => self.tape.modu(dst, src, val),
         }
     }
 
@@ -587,26 +625,31 @@ impl Assembler {
     }
 
     fn emit_cmp_op(&mut self, op: &CmpOp, dst: Operand, a: Operand, b: Operand) {
-        match op {
-            CmpOp::Eq => self.test_eq(a, b),
-            CmpOp::Ne => self.test_ne(a, b),
-            CmpOp::Lt => self.test_lt(a, b),
-            CmpOp::Le => self.test_le(a, b),
-            CmpOp::Gt => self.test_gt(a, b),
-            CmpOp::Ge => self.test_ge(a, b),
-            CmpOp::And => self.mul(dst, a, b),
-            CmpOp::Or => self.add(dst, a, b),
+        let is_conjunction = op.is_and() || op.is_or();
+        if !is_conjunction {
+            self.tape.event_free(vec![dst]);
         }
 
-        if !(op.is_and() || op.is_or()) {
-            self.mov(dst, Operand::Imm(1));
+        match op {
+            CmpOp::Eq => self.tape.test_eq(a, b),
+            CmpOp::Ne => self.tape.test_ne(a, b),
+            CmpOp::Lt => self.tape.test_lt(a, b),
+            CmpOp::Le => self.tape.test_le(a, b),
+            CmpOp::Gt => self.tape.test_gt(a, b),
+            CmpOp::Ge => self.tape.test_ge(a, b),
+            CmpOp::And => self.tape.mul(dst, a, b),
+            CmpOp::Or => self.tape.add(dst, a, b),
+        }
+
+        if !is_conjunction {
+            self.tape.mov(dst, Operand::Imm(1));
         }
     }
 
     fn cast(&mut self, target: Operand, signal_id: crate::game::SignalId) {
         let caster = Operand::temp();
-        self.mov_sig(caster, Operand::Imm(1), signal_id);
-        self.mul(caster, target, target);
-        self.mov(target, caster);
+        self.tape.mov_sig(caster, Operand::Imm(1), signal_id);
+        self.tape.mul(caster, target, target);
+        self.tape.mov(target, caster);
     }
 }

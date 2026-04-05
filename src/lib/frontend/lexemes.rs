@@ -46,8 +46,10 @@ pub const CH_COLON: char = ':';
 pub const CH_SEMICOLON: char = ';';
 pub const CH_WHITESPACE: char = ' ';
 pub const CH_UNDERSCORE: char = '_';
-pub const CH_TAB: char = '\t';
+
+pub const CH_TB: char = '\t';
 pub const CH_NL: char = '\n';
+pub const CH_CR: char = '\r';
 
 pub const CH_LPARAN: char = '(';
 pub const CH_RPARAN: char = ')';

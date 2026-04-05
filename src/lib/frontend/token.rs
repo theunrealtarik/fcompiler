@@ -157,7 +157,7 @@ impl Token {
 
         while let Some(&ch) = chars.peek() {
             match ch {
-                ' ' | '\t' => {
+                CH_WHITESPACE | CH_TB | CH_CR => {
                     chars.next();
                 }
                 CH_NL => {

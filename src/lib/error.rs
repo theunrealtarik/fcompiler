@@ -135,7 +135,7 @@ pub enum GeneratorError {
     RegisterCannotBeTyped,
     InvalidRegister,
     NonAddressableLocation,
-    NonAddressableSymbol,
+    NonAddressableSymbol { ctx: String },
     InvalidInstruction { msg: String },
 }
 
@@ -163,7 +163,7 @@ impl fmt::Display for GeneratorError {
             Self::RegisterCannotBeTyped => write!(f, "register cannot be typed."),
             Self::InvalidRegister => write!(f, "invalid register."),
             Self::NonAddressableLocation => write!(f, "non-addressable location."),
-            Self::NonAddressableSymbol => write!(f, "non-addressable symbol."),
+            Self::NonAddressableSymbol { ctx } => write!(f, "non-addressable symbol: {}", ctx),
             Self::InvalidInstruction { msg } => write!(f, "invalid instruction: {}", msg),
         }
     }

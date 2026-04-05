@@ -21,6 +21,3 @@ let b: CopperPlate = 2;
     let e = a + c;
     out(e);
 }
-
-let f = a + b;
-out(f);

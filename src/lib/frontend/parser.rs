@@ -4,7 +4,6 @@ use super::token::*;
 
 use crate::error::*;
 use crate::game::SignalId;
-use crate::log;
 
 #[derive(Default, Debug)]
 pub struct Parser {
