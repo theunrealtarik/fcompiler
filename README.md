@@ -27,6 +27,9 @@ node_frontend_mod --- node_lexemes_mod
 
 click node_tokenizer_mod "github.com/theunrealtarik/fcpu/blob/8bfa39349154767a7432e99ba4fbecc02cd439ff/src/lib/frontend/token.rs#L25"
 
+class node_frontend_mod,node_lexemes_mod,node_token_mod,node_ast_mod,node_parser_mod,node_tokenizer_mod toneAmber
+
+
 subgraph group_backend["Backend"]
   node_backend_mod["<b>Backend</b>"]
   node_low_mod["<b>Lowering</b><br/>normalization pass"]
@@ -94,8 +97,8 @@ classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
 classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
 classDef toneIndigo fill:#e0e7ff,stroke:#4f46e5,stroke-width:1.5px,color:#312e81
 classDef toneTeal fill:#ccfbf1,stroke:#0f766e,stroke-width:1.5px,color:#134e4a
+
 class node_main_rs,node_lib_root,node_error_mod,node_game_mod toneBlue
-class node_frontend_mod,node_lexemes_mod,node_token_mod,node_ast_mod,node_parser_mod toneAmber
 class node_backend_mod,node_ir_mod,node_low_mod,node_mem_mod,node_symbol_mod,node_tags_mod,node_asm_mod,node_emit_mod toneMint
 class node_tests toneRose
 class node_source_input,node_program_model,node_instruction_stream,node_code_output toneNeutral
