@@ -4,7 +4,6 @@ use super::ir::Label;
 use super::tags::*;
 
 use crate::frontend::ast::*;
-use crate::game::SignalId;
 
 #[derive(Debug, Clone)]
 pub enum EventContext {
