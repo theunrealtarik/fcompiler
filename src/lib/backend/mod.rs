@@ -1,4 +1,7 @@
 pub mod asm;
-pub mod label;
+pub mod emit;
+pub mod ir;
+pub mod low;
 pub mod mem;
 pub mod symbol;
+pub mod tags;

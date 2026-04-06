@@ -1,9 +1,11 @@
-use super::label::*;
 use super::mem::{Location, Register};
+use super::tags::*;
 use crate::game::SignalId;
-use crate::log;
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::collections::HashMap;
+
+pub type SharedScope = Scope;
+pub type SharedSymbol = Symbol;
 
 #[derive(Debug, Default, Clone, Copy, strum_macros::EnumIs)]
 pub enum ScopeKind {
@@ -18,7 +20,7 @@ pub enum ScopeKind {
     Function,
 }
 
-#[derive(Debug, Default, derive_builder::Builder)]
+#[derive(Debug, Default, derive_builder::Builder, Clone)]
 pub struct ScopeMetadata {
     #[builder(setter(skip = true))]
     idx: usize,
@@ -41,14 +43,11 @@ impl ScopeMetadata {
     }
 }
 
-pub type ScopeId = usize;
-pub type SharedScope = Rc<RefCell<Scope>>;
-
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Scope {
     pub parent: Option<ScopeId>,
     pub children: Vec<ScopeId>,
-    pub locals: RefCell<SymbolTable>,
+    pub locals: SymbolTable,
     pub metadata: ScopeMetadata,
 }
 
@@ -63,7 +62,7 @@ impl std::fmt::Debug for Scope {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ScopeArena {
     stack: Vec<ScopeId>,
     table: HashMap<ScopeId, SharedScope>,
@@ -84,20 +83,24 @@ impl ScopeArena {
         self.stack.last().and_then(|id| self.table.get(id))
     }
 
-    pub fn current(&self) -> Option<SharedScope> {
-        self.table.get(&self.current).cloned()
+    pub fn current(&self) -> Option<&Scope> {
+        self.table.get(&self.current)
+    }
+
+    pub fn current_mut(&mut self) -> Option<&mut SharedScope> {
+        self.table.get_mut(&self.current)
     }
 
     // resolve a symbol within a given scope based on its ident
     pub fn resolve(&self, scope_idx: ScopeId, name: &String) -> Option<SymbolHandle> {
         if let Some(scope) = self.table.get(&scope_idx)
-            && let Some(sym_handle) = scope.borrow().locals.borrow().lookup_name(name)
+            && let Some(sym_handle) = scope.locals.lookup_name(name)
         {
             return Some(sym_handle);
         }
 
         if let Some(scope) = self.table.get(&scope_idx)
-            && let Some(parent) = scope.borrow().parent
+            && let Some(parent) = scope.parent
         {
             return self.resolve(parent, name);
         }
@@ -106,15 +109,12 @@ impl ScopeArena {
     }
 
     // uses the birdeye to get the symbol's scope which it uses to resolve data
-    pub fn snatch(&self, sid: &SymbolId) -> Option<SharedSymbol> {
+    pub fn snatch(&self, sid: &SymbolId) -> Option<&SharedSymbol> {
         if let Some(scope_id) = self.birdeye.get(&sid)
             && let Some(scope) = self.table.get(&scope_id)
         {
-            let scope = scope.borrow();
-            let table = scope.locals.borrow();
-
-            if let Some(sym) = table.get(&sid) {
-                return Some(Rc::clone(sym));
+            if let Some(sym) = scope.locals.get(&sid) {
+                return Some(sym);
             }
         }
 
@@ -133,17 +133,14 @@ impl ScopeArena {
                 None => break,
             };
 
-            let scope_ref = scope.borrow();
-            let table = scope_ref.locals.borrow();
-
-            match table.lookup_name(name) {
-                Some(sym_handle) if &sym_handle.sym.borrow().name == name => {
+            match scope.locals.lookup_name(name) {
+                Some(sym_handle) if &sym_handle.sym.name == name => {
                     return Some(sym_handle);
                 }
                 _ => {}
             }
 
-            match scope_ref.parent {
+            match scope.parent {
                 Some(parent) if parent != idx => idx = parent,
                 _ => break,
             }
@@ -153,13 +150,10 @@ impl ScopeArena {
     }
 
     pub fn define_symbol(&mut self, sid: SymbolId, sym: Symbol) {
-        if let Some(scope) = self.current() {
-            let shared_symbol = Rc::new(RefCell::new(sym));
-            let scope = scope.borrow();
-            let mut table = scope.locals.borrow_mut();
-
-            self.birdeye.insert(sid, scope.metadata.idx());
-            table.bind(sid, Rc::clone(&shared_symbol));
+        if let Some(scope) = self.current_mut() {
+            let idx = scope.metadata.idx().clone();
+            scope.locals.bind(sid, sym);
+            self.birdeye.insert(sid, idx);
         }
     }
 
@@ -171,17 +165,11 @@ impl ScopeArena {
         let idx = self.stack.len();
         self.current = idx;
 
-        if let Some(p) = parent {
-            if let Some(scope_rc) = self.table.get(&p) {
-                scope_rc.borrow_mut().children.push(idx);
-            }
-        }
-
         let depth = parent
             .map(|p| {
                 self.table
                     .get(&p)
-                    .map(|s| s.borrow().metadata.depth + 1)
+                    .map(|s| s.metadata.depth + 1)
                     .unwrap_or(0)
             })
             .unwrap_or(0);
@@ -202,7 +190,14 @@ impl ScopeArena {
         };
 
         self.stack.push(idx);
-        self.table.insert(idx, Rc::new(RefCell::new(scope)));
+        self.table.insert(idx, scope);
+
+        if let Some(p) = parent {
+            if let Some(scope) = self.table.get_mut(&p) {
+                scope.children.push(idx);
+            }
+        }
+
         self.last().unwrap().clone()
     }
 
@@ -236,7 +231,7 @@ pub struct SymbolHandle {
     pub sym: SharedSymbol,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Symbol {
     pub name: String,
     pub loc: Location,
@@ -249,19 +244,7 @@ impl Symbol {
     }
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct SymbolId(pub i32);
-
-impl std::ops::Deref for SymbolId {
-    type Target = i32;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-type SharedSymbol = Rc<RefCell<Symbol>>;
-
+#[derive(Clone)]
 pub struct SymbolTable {
     storage: HashMap<SymbolId, SharedSymbol>,
     field: HashMap<String, SymbolId>,
@@ -271,7 +254,6 @@ impl std::fmt::Debug for SymbolTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug_struct = f.debug_struct("SymbolTable");
         for (id, sym) in &self.storage {
-            let sym = sym.borrow();
             debug_struct.field(
                 &format!("{} ({})", sym.name, id.0),
                 &format!(
@@ -316,22 +298,19 @@ impl SymbolTable {
     }
 
     pub fn bind(&mut self, sid: SymbolId, sym: SharedSymbol) {
-        let indent = sym.borrow().name.clone();
+        let indent = sym.name.clone();
         self.storage.insert(sid, sym);
         self.field.insert(indent, sid);
     }
 
-    pub fn lookup_register(&self, reg: &Register) -> Option<SharedSymbol> {
+    pub fn lookup_register(&self, reg: &Register) -> Option<&SharedSymbol> {
         self.storage
             .iter()
-            .find(|(_, sym)| {
-                let sym = sym.borrow();
-                match sym.loc {
-                    Location::Reg(r) => &r == reg,
-                    _ => false,
-                }
+            .find(|(_, sym)| match sym.loc {
+                Location::Reg(r) => &r == reg,
+                _ => false,
             })
-            .map(|(_, sym)| Rc::clone(&sym))
+            .map(|(_, sym)| sym)
     }
 
     pub fn lookup_name(&self, name: &String) -> Option<SymbolHandle> {

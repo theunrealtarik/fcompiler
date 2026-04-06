@@ -1,60 +1,10 @@
-use lazy_static::lazy_static;
 use std::collections::HashMap;
-use std::sync::Mutex;
-use std::vec;
 
-lazy_static! {
-    static ref TEMP_ID_TRACK: Mutex<i32> = Mutex::new(0);
-    static ref SYMB_ID_TRACK: Mutex<i32> = Mutex::new(0);
-}
+use super::ir::Label;
+use super::tags::*;
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct TempId(pub i32);
-
-impl std::ops::Deref for TempId {
-    type Target = i32;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum_macros::EnumIs)]
-pub enum Operand {
-    Persistent(crate::backend::symbol::SymbolId),
-    Temp(TempId),
-    Imm(i32),
-}
-
-#[allow(clippy::from_over_into)]
-impl Into<i32> for Operand {
-    fn into(self) -> i32 {
-        match self {
-            Operand::Persistent(pid) => *pid,
-            Operand::Temp(tid) => *tid,
-            Operand::Imm(n) => n,
-        }
-    }
-}
-
-impl Operand {
-    pub fn temp() -> Operand {
-        let mut guard = TEMP_ID_TRACK.lock().unwrap();
-        let id = *guard;
-        *guard += 1;
-        Operand::Temp(TempId(id))
-    }
-
-    pub fn persistent() -> Operand {
-        let mut guard = SYMB_ID_TRACK.lock().unwrap();
-        let id = *guard;
-        *guard += 1;
-        Operand::Persistent(SymbolId(id))
-    }
-
-    pub fn immediate(value: i32) -> Operand {
-        Operand::Imm(value)
-    }
-}
+use crate::frontend::ast::*;
+use crate::game::SignalId;
 
 #[derive(Debug, Clone)]
 pub enum EventContext {
@@ -62,10 +12,6 @@ pub enum EventContext {
     ScopeDropped { scope_idx: ScopeId },
     Free { oprs: Vec<Operand> },
 }
-
-use crate::backend::asm::Label;
-use crate::backend::symbol::*;
-use crate::frontend::ast::*;
 
 type Dst = Operand;
 type Src = Operand;
@@ -156,7 +102,7 @@ impl Instruction {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Tape {
     pub instrs: Vec<Instruction>,
 }
@@ -170,7 +116,9 @@ impl Tape {
         for instr in instrs {
             for src in instr.sources() {
                 if let Operand::Temp(temp_id) = src {
-                    map.entry(*temp_id).and_modify(|count| *count += 1);
+                    map.entry(*temp_id)
+                        .and_modify(|count| *count += 1)
+                        .or_insert(1);
                 }
             }
         }

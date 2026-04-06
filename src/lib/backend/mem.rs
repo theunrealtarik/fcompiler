@@ -33,7 +33,7 @@ impl std::fmt::Display for Register {
 
 // register allocator
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct RegisterAllocator {
     free: u64,
 }
@@ -251,16 +251,16 @@ impl OutputManager {
 
 // memory manager
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mark {
     Alive,
     Dead,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MemoryManager {
     marks: HashMap<Register, Mark>,
-    pub temps: HashMap<super::asm::TempId, Register>,
+    pub temps: HashMap<super::tags::TempId, Register>,
     pub regs: RegisterAllocator,
     pub stack: StackAllocator,
 }

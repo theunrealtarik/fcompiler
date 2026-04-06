@@ -6,6 +6,7 @@ pub mod game;
 
 pub mod compiler {
     use crate::backend::asm::Assembler;
+    use crate::backend::low::Lowerer;
     use crate::frontend::ast::Program;
     use crate::frontend::parser::Parser;
 
@@ -15,9 +16,14 @@ pub mod compiler {
         pub fn compile(src: &str) -> Result<String, crate::error::CompileError> {
             let stmts = Parser::new(src)?.parse()?;
             let program = Program::from(stmts);
-            let mut assembler = Assembler::new(program);
-            assembler.finish()?;
-            Ok(assembler.code().clone())
+
+            let mut lowered = Lowerer::new(program);
+            lowered.resolve()?;
+
+            let mut assembler = Assembler::new(lowered);
+            assembler.assemble()?;
+
+            Ok(assembler.code().to_string())
         }
     }
 }

@@ -8,4 +8,4 @@
 
 scripts/signals/data_raw.lua
 src/lib/game/signals.rs
-test/**/*.fac
+test/tmp.fac
