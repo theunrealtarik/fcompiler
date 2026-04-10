@@ -83,6 +83,7 @@ pub enum LabelKind {
 impl Label {
     pub const COND: &'static str = "cond";
     pub const LOOP: &'static str = "loop";
+    pub const WHILE: &'static str = "while";
 
     pub fn new(kind: LabelKind) -> Self {
         let id = Self::id();

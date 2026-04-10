@@ -1,6 +1,7 @@
 use super::mem::{Location, Register};
 use super::tags::*;
 use crate::game::SignalId;
+use crate::log;
 
 use std::collections::HashMap;
 
@@ -18,6 +19,12 @@ pub enum ScopeKind {
     While,
     Loop,
     Function,
+}
+
+impl ScopeKind {
+    pub fn is_breakable(&self) -> bool {
+        matches!(self, ScopeKind::For | ScopeKind::While | ScopeKind::Loop)
+    }
 }
 
 #[derive(Debug, Default, derive_builder::Builder, Clone)]
@@ -84,7 +91,19 @@ impl ScopeArena {
     }
 
     pub fn current(&self) -> Option<&Scope> {
-        self.table.get(&self.current)
+        if let Some(idx) = self.stack.get(self.current - 1) {
+            self.table.get(idx)
+        } else {
+            None
+        }
+    }
+
+    pub fn set_current(&mut self, idx: usize) {
+        if idx >= self.table.len() {
+            panic!("index out of bounds");
+        }
+
+        self.current = idx;
     }
 
     pub fn current_mut(&mut self) -> Option<&mut SharedScope> {
@@ -162,8 +181,8 @@ impl ScopeArena {
         parent: Option<ScopeId>,
         metadata: ScopeMetadata,
     ) -> SharedScope {
-        let idx = self.stack.len();
-        self.current = idx;
+        let idx = self.stack.len() + 1;
+        self.current += 1;
 
         let depth = parent
             .map(|p| {
@@ -205,7 +224,8 @@ impl ScopeArena {
         self.enter_scope_explicit(parent, ScopeMetadata::default())
     }
 
-    pub fn leave_scope(&mut self) {
+    pub fn leave_current(&mut self) {
+        self.stack.pop();
         self.current -= 1;
     }
 
@@ -213,15 +233,17 @@ impl ScopeArena {
         self.table.remove(scope_idx)
     }
 
-    pub fn ladder(&self, ground: ScopeId) -> Vec<SharedScope> {
-        self.stack[0..=ground]
-            .iter()
-            .rev()
-            .collect::<Vec<&ScopeId>>()
-            .into_iter()
-            .filter_map(|scope_idx| self.table.get(scope_idx))
-            .cloned()
-            .collect::<Vec<_>>()
+    pub fn ladder(&self, current: &Scope) -> Vec<SharedScope> {
+        let mut ladder = Vec::new();
+        ladder.push(current.clone());
+
+        if let Some(parent) = current.parent
+            && let Some(parent) = self.table.get(&parent)
+        {
+            ladder.append(&mut self.ladder(parent));
+        }
+
+        ladder
     }
 }
 

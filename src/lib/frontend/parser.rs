@@ -57,7 +57,7 @@ impl Parser {
                 Token::If => self.parse_if(),
                 Token::For => todo!(),
                 Token::Loop => self.parse_loop(),
-                Token::While => todo!(),
+                Token::While => self.parse_while(),
                 Token::Break => {
                     self.consume()?;
                     self.expect(Token::Semicolon)?;
@@ -205,6 +205,16 @@ impl Parser {
         self.expect(Token::Loop)?;
         let body = self.parse_block_literal()?;
         Ok(StatementKind::Loop { body })
+    }
+
+    fn parse_while(&mut self) -> Result<StatementKind, CompileError> {
+        self.expect(Token::While)?;
+
+        let tokens = self.collect_until(Token::LCurly)?;
+        let cond = Expresso::new(&tokens).parse_expression(0)?;
+        let body = self.parse_block_literal()?;
+
+        Ok(StatementKind::While { body, cond })
     }
 
     fn peek(&self) -> Option<&Token> {

@@ -1,5 +1,6 @@
 use crate::error::*;
 use crate::frontend::ast::*;
+use crate::log;
 
 use super::ir::*;
 use super::mem::*;
@@ -157,7 +158,6 @@ impl Lowerer {
                 if is_singular_instr && !then.first().map(|i| i.kind.is_out()).unwrap_or_default() {
                     self.tape.test_ne(dst, Operand::Imm(0));
                     self.handle_statements(then, then_scope.clone())?;
-                    // self.tape.jump(Label::new(LabelKind::Ipt), Some(2));
                 } else {
                     self.tape
                         .br_eq(dst, Operand::Imm(0), label_suffixed.clone());
@@ -169,7 +169,7 @@ impl Lowerer {
                     self.tape.label(label_suffixed.clone());
                 }
 
-                self.scopes.leave_scope();
+                self.scopes.leave_current();
 
                 if let Some(alter) = alter {
                     if alter.is_empty() {
@@ -188,7 +188,7 @@ impl Lowerer {
                         self.tape.label(label.suffix("end"))
                     }
 
-                    self.scopes.leave_scope();
+                    self.scopes.leave_current();
                 }
             }
             StatementKind::Loop { body } => {
@@ -210,15 +210,62 @@ impl Lowerer {
                 self.tape.jump(loop_start, None);
                 self.tape.label(loop_end);
 
-                self.scopes.leave_scope();
+                self.scopes.leave_current();
             }
-            StatementKind::While { .. } => todo!(),
+            StatementKind::While { cond, body } => {
+                let label = Label::raw(Label::WHILE);
+                let start = label.suffix("start");
+                let finish = label.suffix("finish");
+
+                let while_scope = self.scopes.enter_scope_explicit(
+                    Some(parent.metadata.idx()),
+                    ScopeMetadataBuilder::default()
+                        .kind(ScopeKind::While)
+                        .exit_label(finish.clone())
+                        .build()
+                        .unwrap(),
+                );
+
+                self.tape.label(start.clone());
+                self.handle_statements(body, while_scope)?;
+
+                let dst = self
+                    .proc_expr(&cond, None)
+                    .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
+
+                self.tape.test_eq(dst, Operand::Imm(1));
+                self.tape.jump(start, None);
+                self.tape.label(finish);
+
+                self.scopes.leave_current();
+            }
             StatementKind::Block { body } => {
                 let local_scope = self.scopes.enter_scope(Some(parent.metadata.idx()));
                 self.handle_statements(body, local_scope)?;
-                self.scopes.leave_scope();
+                self.scopes.leave_current();
             }
-            StatementKind::Break => {}
+            StatementKind::Break => {
+                let current = self.scopes.current().unwrap();
+                let ladder = self.scopes.ladder(current);
+
+                // log::warn!("{:#?}", current.metadata.idx());
+                // log::info!("{:#?}", ladder);
+
+                for scope in ladder {
+                    let metadata = scope.metadata;
+
+                    if metadata.kind.is_breakable()
+                        && let Some(exit_label) = metadata.exit_label
+                    {
+                        self.tape.jump(exit_label, None);
+                        return Ok(());
+                    }
+                }
+
+                return Err(gen_err!(GeneratorError::InvalidInstruction {
+                    msg: String::from("break outside of loop")
+                }));
+            }
             _ => unimplemented!(),
         }
 

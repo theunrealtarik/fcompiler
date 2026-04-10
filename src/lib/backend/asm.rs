@@ -36,6 +36,9 @@ impl Assembler {
         let instructions = self.tape.instrs.clone();
         let mut tmps = self.tape.count_temp();
 
+        // println!("{:#?}", self.scopes);
+
+        self.code.push_str(&AsmFormatter::clr::<String>(None));
         for (_, instr) in instructions.iter().enumerate() {
             log::asm!("{:?}", instr);
             let asm_line = match instr {
