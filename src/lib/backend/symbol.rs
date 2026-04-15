@@ -2,8 +2,6 @@ use super::mem::{Location, Register};
 use super::tags::*;
 use crate::game::SignalId;
 
-use crate::frontend::ast::*;
-
 #[allow(unused_imports)]
 use crate::log;
 
