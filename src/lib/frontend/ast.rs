@@ -65,6 +65,7 @@ pub enum StatementKind {
 
     Break,
     Continue,
+
     Return {
         data: Expression,
     },
@@ -124,6 +125,36 @@ impl IntoIterator for Program {
 impl From<Vec<StatementContext>> for Program {
     fn from(value: Vec<StatementContext>) -> Self {
         Self(value)
+    }
+}
+
+impl Program {
+    pub fn new(statements: Vec<StatementContext>) -> Self {
+        Self(statements)
+    }
+
+    pub fn contains_break(stmts: &Block) -> bool {
+        let mut contains_break = false;
+
+        if stmts.iter().any(|stmt| stmt.kind.is_break()) {
+            contains_break = true;
+        }
+
+        for stmt in stmts {
+            return match stmt.kind.clone() {
+                StatementKind::Block { body } => Self::contains_break(&body),
+                StatementKind::Loop { body } => Self::contains_break(&body),
+                StatementKind::While { body, .. } => Self::contains_break(&body),
+                StatementKind::For { body, .. } => Self::contains_break(&body),
+                StatementKind::If { then, alter, .. } => {
+                    Self::contains_break(&then)
+                        || alter.as_ref().map_or(false, |b| Self::contains_break(b))
+                }
+                _ => continue,
+            };
+        }
+
+        contains_break
     }
 }
 

@@ -189,7 +189,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fcpu"
+name = "fcompiler"
 version = "0.1.0"
 dependencies = [
  "clap",

@@ -263,10 +263,9 @@ impl Lowerer {
                         .unwrap(),
                 );
                 let for_scope_idx = for_scope.metadata.idx();
-                let contains_break = body.iter().find(|instr| instr.kind.is_break()).is_some();
-
                 self.tape.event_scope_enter(for_scope_idx);
 
+                let contains_break = Program::contains_break(&body);
                 let dst = Operand::persistent();
                 let reg = self
                     .memory
@@ -316,8 +315,6 @@ impl Lowerer {
             StatementKind::Break => {
                 let current = self.scopes.current().unwrap();
                 let ladder = self.scopes.ladder(current);
-
-                log::info!("{:#?}", ladder);
 
                 for scope in ladder {
                     let metadata = scope.metadata;

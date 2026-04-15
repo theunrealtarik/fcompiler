@@ -11,7 +11,7 @@ subgraph group_entry["Entry"]
   node_lib_root["Library Root Facade"]
   node_error_mod["Errors<br/>[error.rs]"]
   node_game_mod["Game<br/>domain module"]
-end 
+end
 
 subgraph group_frontend["Frontend"]
   node_frontend_mod["<b>Frontend</b>"]
@@ -25,7 +25,7 @@ node_tokenizer_mod -->|"streamed"| node_parser_mod
 node_frontend_mod --- node_lexemes_mod
 
 
-click node_tokenizer_mod "github.com/theunrealtarik/fcpu/blob/8bfa39349154767a7432e99ba4fbecc02cd439ff/src/lib/frontend/token.rs#L25"
+click node_tokenizer_mod "github.com/theunrealtarik/fcompiler/blob/8bfa39349154767a7432e99ba4fbecc02cd439ff/src/lib/frontend/token.rs#L25"
 
 class node_frontend_mod,node_lexemes_mod,node_token_mod,node_ast_mod,node_parser_mod,node_tokenizer_mod toneAmber
 
@@ -72,23 +72,23 @@ node_tests -.->|"exercise"| node_source_input
 node_game_mod --> node_lib_root
 
 
-click node_main_rs "https://github.com/theunrealtarik/fcpu/blob/master/src/main.rs"
-click node_lib_root "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/mod.rs"
-click node_error_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/error.rs"
-click node_frontend_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/frontend/mod.rs"
-click node_lexemes_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/frontend/lexemes.rs"
-click node_token_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/frontend/token.rs"
-click node_ast_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/frontend/ast.rs"
-click node_parser_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/frontend/parser.rs"
-click node_backend_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/backend/mod.rs"
-click node_ir_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/backend/ir.rs"
-click node_low_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/backend/low.rs"
-click node_mem_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/backend/mem.rs"
-click node_symbol_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/backend/symbol.rs"
-click node_tags_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/backend/tags.rs"
-click node_asm_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/backend/asm.rs"
-click node_emit_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/backend/emit.rs"
-click node_game_mod "https://github.com/theunrealtarik/fcpu/blob/master/src/lib/game/mod.rs"
+click node_main_rs "https://github.com/theunrealtarik/fcompiler/blob/master/src/main.rs"
+click node_lib_root "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/mod.rs"
+click node_error_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/error.rs"
+click node_frontend_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/frontend/mod.rs"
+click node_lexemes_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/frontend/lexemes.rs"
+click node_token_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/frontend/token.rs"
+click node_ast_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/frontend/ast.rs"
+click node_parser_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/frontend/parser.rs"
+click node_backend_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/backend/mod.rs"
+click node_ir_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/backend/ir.rs"
+click node_low_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/backend/low.rs"
+click node_mem_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/backend/mem.rs"
+click node_symbol_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/backend/symbol.rs"
+click node_tags_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/backend/tags.rs"
+click node_asm_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/backend/asm.rs"
+click node_emit_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/backend/emit.rs"
+click node_game_mod "https://github.com/theunrealtarik/fcompiler/blob/master/src/lib/game/mod.rs"
 
 classDef toneNeutral fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
 classDef toneBlue fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554

@@ -1,7 +1,8 @@
 use super::mem::{Location, Register};
 use super::tags::*;
-use crate::frontend::ast::StatementContext;
 use crate::game::SignalId;
+
+use crate::frontend::ast::*;
 
 #[allow(unused_imports)]
 use crate::log;
@@ -31,10 +32,6 @@ impl ScopeKind {
 
     pub fn is_continueable(&self) -> bool {
         matches!(self, ScopeKind::For | ScopeKind::While | ScopeKind::Loop)
-    }
-
-    pub fn contains_break(&self, stmts: &Vec<StatementContext>) -> bool {
-        todo!()
     }
 }
 
