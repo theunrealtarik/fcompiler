@@ -1,5 +1,6 @@
 use super::mem::{Location, Register};
 use super::tags::*;
+use crate::frontend::ast::StatementContext;
 use crate::game::SignalId;
 
 #[allow(unused_imports)]
@@ -26,6 +27,14 @@ pub enum ScopeKind {
 impl ScopeKind {
     pub fn is_breakable(&self) -> bool {
         matches!(self, ScopeKind::For | ScopeKind::While | ScopeKind::Loop)
+    }
+
+    pub fn is_continueable(&self) -> bool {
+        matches!(self, ScopeKind::For | ScopeKind::While | ScopeKind::Loop)
+    }
+
+    pub fn contains_break(&self, stmts: &Vec<StatementContext>) -> bool {
+        todo!()
     }
 }
 
@@ -116,7 +125,7 @@ impl ScopeArena {
         self.current = idx;
     }
 
-    // resolve a symbol within a given scope based on its ident
+    /// Resolve a symbol within a given scope based on its ident
     pub fn resolve(&self, scope_idx: ScopeId, name: &String) -> Option<SymbolHandle> {
         if let Some(scope) = self.table.get(&scope_idx)
             && let Some(sym_handle) = scope.locals.lookup_name(name)
@@ -133,7 +142,7 @@ impl ScopeArena {
         None
     }
 
-    // uses the birdeye to get the symbol's scope which it uses to resolve data
+    /// Uses the birdeye to get the symbol's scope which it uses to resolve data
     pub fn snatch(&self, sid: &SymbolId) -> Option<&SharedSymbol> {
         if let Some(scope_id) = self.birdeye.get(&sid)
             && let Some(scope) = self.table.get(&scope_id)
@@ -230,6 +239,7 @@ impl ScopeArena {
         self.enter_scope_explicit(parent, ScopeMetadata::default())
     }
 
+    /// Pops the current scope from the stack, and readjusts the current scope index
     pub fn leave_current(&mut self) {
         self.stack.pop();
         self.current -= 1;

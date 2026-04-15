@@ -87,19 +87,7 @@ impl Parser {
         let token = self.consume()?;
         if let Token::Ident { name, sid } = token.kind {
             self.expect(Token::Equal)?;
-
-            if lexemes::RESERVED_KEYWORDS.contains(&name.as_str()) {
-                return Err(parse_err!(
-                    ParseError::ReservedKeyword {
-                        keyword: name.to_string(),
-                    },
-                    token.span
-                ));
-            }
-
-            if !self.validate_identifier(&name) {
-                return Err(parse_err!(ParseError::InvalidIdentifier, token.span));
-            }
+            self.validate_identifier(&name, token.span)?;
 
             let signal_id = match sid {
                 Some(id) => SignalId::from_str(&id).ok(),
@@ -221,41 +209,36 @@ impl Parser {
         self.expect(Token::For)?;
 
         let iterator = self.consume()?;
-        if let Token::Ident { name, sid } = iterator.kind {
+        if let Token::Ident { name, .. } = iterator.kind {
             self.expect(Token::In)?;
 
-            if lexemes::RESERVED_KEYWORDS.contains(&name.as_str()) {
-                return Err(parse_err!(
-                    ParseError::ReservedKeyword {
-                        keyword: name.to_string(),
-                    },
-                    iterator.span
-                ));
+            self.validate_identifier(&name, iterator.span)?;
+
+            // let sid = sid
+            //     .map(|sid| SignalId::from_str(&sid).ok())
+            //     .unwrap_or_default();
+
+            macro_rules! process_range_definition {
+                () => {{
+                    let current = self.consume()?;
+                    match current.kind {
+                        Token::Integer(i) => Literal::Integer(i),
+                        Token::Ident { name, .. } => {
+                            self.validate_identifier(&name, current.span)?;
+                            Literal::Ident(name)
+                        }
+                        _ => return Err(parse_err!(ParseError::UnexpectedPattern, current.span)),
+                    }
+                }};
             }
 
-            if !self.validate_identifier(&name) {
-                return Err(parse_err!(ParseError::InvalidIdentifier, iterator.span));
-            }
-
-            let sid = sid
-                .map(|sid| SignalId::from_str(&sid).ok())
-                .unwrap_or_default();
-
-            let start = match self.consume()?.kind {
-                Token::Integer(i) => Literal::Integer(i),
-                _ => return Err(parse_err!(ParseError::UnexpectedPattern, iterator.span)),
-            };
-
+            let start = process_range_definition!();
             let inclusive = match self.consume()?.kind {
                 Token::DotDotEqual => true,
                 Token::DotDot => false,
                 _ => return Err(parse_err!(ParseError::UnexpectedPattern, iterator.span)),
             };
-
-            let end = match self.consume()?.kind {
-                Token::Integer(i) => Literal::Integer(i),
-                _ => return Err(parse_err!(ParseError::UnexpectedPattern, iterator.span)),
-            };
+            let end = process_range_definition!();
 
             return Ok(StatementKind::For {
                 iter: name,
@@ -337,24 +320,38 @@ impl Parser {
         }
     }
 
-    fn validate_identifier(&self, s: &str) -> bool {
+    fn validate_identifier(&self, s: &str, span: Option<Span>) -> Result<(), CompileError> {
+        if lexemes::RESERVED_KEYWORDS.contains(&s) {
+            return Err(parse_err!(
+                ParseError::ReservedKeyword {
+                    keyword: s.to_string(),
+                },
+                span
+            ));
+        }
+
+        let mut valid = true;
         let mut chars = s.chars();
         match chars.next() {
-            None => return false,
+            None => valid = false,
             Some(c) => {
                 if !(c.is_ascii_alphabetic() || c == lexemes::CH_UNDERSCORE) {
-                    return false;
+                    valid = false;
                 }
             }
         }
 
         for c in chars {
             if !(c.is_ascii_alphanumeric() || c == lexemes::CH_UNDERSCORE) {
-                return false;
+                valid = false;
             }
         }
 
-        true
+        if !valid {
+            return Err(parse_err!(ParseError::InvalidIdentifier, span));
+        }
+
+        Ok(())
     }
 }
 

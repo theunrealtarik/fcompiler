@@ -127,7 +127,6 @@ use super::ast::*;
 use super::lexemes;
 
 use crate::error::*;
-use crate::frontend::token;
 
 impl Token {
     pub fn tokenize(src: &str) -> Result<Vec<TokenContext>, CompileError> {

@@ -158,13 +158,16 @@ impl Lowerer {
                         .unwrap(),
                 );
 
+                let then_scope_idx = then_scope.metadata.idx();
+                self.tape.event_scope_enter(then_scope_idx);
+
                 if is_singular_instr && !then.first().map(|i| i.kind.is_out()).unwrap_or_default() {
                     self.tape.test_ne(dst, Operand::Imm(0));
                     self.handle_statements(then, then_scope.clone())?;
                 } else {
                     self.tape
                         .br_eq(dst, Operand::Imm(0), label_suffixed.clone());
-                    self.handle_statements(then, then_scope.clone())?;
+                    self.handle_statements(then, then_scope)?;
                     if alter.is_some() {
                         self.tape.jump(label.suffix("end"), None);
                     }
@@ -172,6 +175,7 @@ impl Lowerer {
                     self.tape.label(label_suffixed.clone());
                 }
 
+                self.tape.event_scope_drop(then_scope_idx);
                 self.scopes.leave_current();
 
                 if let Some(alter) = alter {
@@ -186,11 +190,14 @@ impl Lowerer {
                             .build()
                             .unwrap(),
                     );
-                    self.handle_statements(alter, else_scope.clone())?;
+                    let else_scope_idx = else_scope.metadata.idx();
+
+                    self.handle_statements(alter, else_scope)?;
                     if !is_singular_instr {
                         self.tape.label(label.suffix("end"))
                     }
 
+                    self.tape.event_scope_drop(else_scope_idx);
                     self.scopes.leave_current();
                 }
             }
@@ -205,18 +212,19 @@ impl Lowerer {
                         .build()
                         .unwrap(),
                 );
+                let loop_scope_idx = loop_scope.metadata.idx();
 
+                self.tape.event_scope_enter(loop_scope_idx);
                 self.tape.label(loop_label.init());
-                self.handle_statements(body, loop_scope.clone())?;
+                self.handle_statements(body, loop_scope)?;
                 self.tape.jump(loop_label.init(), None);
                 self.tape.label(loop_label.end());
-
+                self.tape.event_scope_drop(loop_scope_idx);
                 self.scopes.leave_current();
             }
 
             StatementKind::While { cond, body } => {
                 let while_label = Label::raw(Label::WHILE);
-
                 let while_scope = self.scopes.enter_scope_explicit(
                     Some(parent.metadata.idx()),
                     ScopeMetadataBuilder::default()
@@ -226,6 +234,8 @@ impl Lowerer {
                         .unwrap(),
                 );
 
+                let while_scope_idx = while_scope.metadata.idx();
+                self.tape.event_scope_enter(while_scope_idx);
                 self.tape.label(while_label.init());
                 self.handle_statements(body, while_scope)?;
 
@@ -237,6 +247,7 @@ impl Lowerer {
                 self.tape.jump(while_label.init(), None);
                 self.tape.label(while_label.end());
 
+                self.tape.event_scope_drop(while_scope_idx);
                 self.scopes.leave_current();
             }
 
@@ -245,10 +256,16 @@ impl Lowerer {
                 let for_scope = self.scopes.enter_scope_explicit(
                     Some(parent.metadata.idx()),
                     ScopeMetadataBuilder::default()
+                        .start_label(for_label.init())
                         .kind(ScopeKind::For)
+                        .exit_label(for_label.end())
                         .build()
                         .unwrap(),
                 );
+                let for_scope_idx = for_scope.metadata.idx();
+                let contains_break = body.iter().find(|instr| instr.kind.is_break()).is_some();
+
+                self.tape.event_scope_enter(for_scope_idx);
 
                 let dst = Operand::persistent();
                 let reg = self
@@ -261,7 +278,6 @@ impl Lowerer {
                     Symbol::new(iter.clone(), Location::Reg(reg), None),
                 );
 
-                let contains_break = body.iter().find(|instr| instr.kind.is_break()).is_some();
                 let start = self
                     .eval_literal(&range.start)
                     .map_err(|kind| CompileError::new(kind, None))?;
@@ -272,11 +288,11 @@ impl Lowerer {
                 self.tape.mov(dst, start);
                 self.tape.label(for_label.init());
 
-                self.handle_statements(body, for_scope.clone())?;
+                self.handle_statements(body, for_scope)?;
                 self.tape.inc(dst);
 
                 if range.inclusive {
-                    self.tape.br_ne(dst, end, for_label.init());
+                    self.tape.br_le(dst, end, for_label.init());
                 } else {
                     self.tape.br_lt(dst, end, for_label.init());
                 }
@@ -285,24 +301,26 @@ impl Lowerer {
                     self.tape.label(for_label.end());
                 }
 
+                self.tape.event_scope_drop(for_scope_idx);
                 self.scopes.leave_current();
             }
 
             StatementKind::Block { body } => {
                 let local_scope = self.scopes.enter_scope(Some(parent.metadata.idx()));
+                let local_scope_idx = local_scope.metadata.idx();
+                self.tape.event_scope_enter(local_scope_idx);
                 self.handle_statements(body, local_scope)?;
+                self.tape.event_scope_drop(local_scope_idx);
                 self.scopes.leave_current();
             }
             StatementKind::Break => {
                 let current = self.scopes.current().unwrap();
                 let ladder = self.scopes.ladder(current);
 
-                // log::warn!("{:#?}", current.metadata.idx());
-                // log::info!("{:#?}", ladder);
+                log::info!("{:#?}", ladder);
 
                 for scope in ladder {
                     let metadata = scope.metadata;
-
                     if metadata.kind.is_breakable()
                         && let Some(exit_label) = metadata.exit_label
                     {
@@ -311,9 +329,12 @@ impl Lowerer {
                     }
                 }
 
-                return Err(gen_err!(GeneratorError::InvalidInstruction {
-                    msg: String::from("break outside of loop")
-                }));
+                return Err(gen_err!(
+                    GeneratorError::InvalidInstruction {
+                        msg: String::from("break outside of loop")
+                    },
+                    stmt.span
+                ));
             }
             _ => unimplemented!(),
         }
