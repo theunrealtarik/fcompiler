@@ -55,7 +55,7 @@ impl Parser {
                 Token::Out => self.parse_out(),
                 Token::LCurly => self.parse_block(),
                 Token::If => self.parse_if(),
-                Token::For => todo!(),
+                Token::For => self.parse_for(),
                 Token::Loop => self.parse_loop(),
                 Token::While => self.parse_while(),
                 Token::Break => {
@@ -142,14 +142,14 @@ impl Parser {
 
         match token.kind {
             Token::Ident { name, sid } => {
-                signal.value = SignalValue::Var(name);
+                signal.value = Literal::Ident(name);
                 signal.id = match sid {
                     Some(id) => SignalId::from_str(&id).ok(),
                     None => None,
                 };
             }
-            Token::Number(n) => {
-                signal.value = SignalValue::Num(n);
+            Token::Integer(n) => {
+                signal.value = Literal::Integer(n);
             }
             _ => return Err(parse_err!(ParseError::UnexpectedPattern, token.span)),
         }
@@ -217,6 +217,60 @@ impl Parser {
         Ok(StatementKind::While { body, cond })
     }
 
+    fn parse_for(&mut self) -> Result<StatementKind, CompileError> {
+        self.expect(Token::For)?;
+
+        let iterator = self.consume()?;
+        if let Token::Ident { name, sid } = iterator.kind {
+            self.expect(Token::In)?;
+
+            if lexemes::RESERVED_KEYWORDS.contains(&name.as_str()) {
+                return Err(parse_err!(
+                    ParseError::ReservedKeyword {
+                        keyword: name.to_string(),
+                    },
+                    iterator.span
+                ));
+            }
+
+            if !self.validate_identifier(&name) {
+                return Err(parse_err!(ParseError::InvalidIdentifier, iterator.span));
+            }
+
+            let sid = sid
+                .map(|sid| SignalId::from_str(&sid).ok())
+                .unwrap_or_default();
+
+            let start = match self.consume()?.kind {
+                Token::Integer(i) => Literal::Integer(i),
+                _ => return Err(parse_err!(ParseError::UnexpectedPattern, iterator.span)),
+            };
+
+            let inclusive = match self.consume()?.kind {
+                Token::DotDotEqual => true,
+                Token::DotDot => false,
+                _ => return Err(parse_err!(ParseError::UnexpectedPattern, iterator.span)),
+            };
+
+            let end = match self.consume()?.kind {
+                Token::Integer(i) => Literal::Integer(i),
+                _ => return Err(parse_err!(ParseError::UnexpectedPattern, iterator.span)),
+            };
+
+            return Ok(StatementKind::For {
+                iter: name,
+                range: Range {
+                    start,
+                    inclusive,
+                    end,
+                },
+                body: self.parse_block_literal()?,
+            });
+        }
+
+        Err(parse_err!(ParseError::UnexpectedPattern, iterator.span))
+    }
+
     fn peek(&self) -> Option<&Token> {
         self.peek_context().map(|tc| &tc.kind)
     }
@@ -266,11 +320,12 @@ impl Parser {
             .ok_or(parse_err!(ParseError::UnexpectedPattern))
     }
 
-    fn expect(&mut self, expected_token: Token) -> Result<(), CompileError> {
+    fn expect(&mut self, expected_token: Token) -> Result<TokenContext, CompileError> {
         match self.peek_context() {
             Some(token) if token.kind == expected_token => {
+                let token = token.clone();
                 self.next();
-                Ok(())
+                Ok(token)
             }
             Some(token) => Err(parse_err!(
                 ParseError::UnexpectedToken {

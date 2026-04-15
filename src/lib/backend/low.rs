@@ -1,11 +1,13 @@
 use crate::error::*;
 use crate::frontend::ast::*;
-use crate::log;
 
 use super::ir::*;
 use super::mem::*;
 use super::symbol::*;
 use super::tags::*;
+
+#[allow(unused_imports)]
+use crate::log;
 
 #[derive(Debug, Default)]
 pub struct Lowerer {
@@ -47,14 +49,10 @@ impl Lowerer {
         stmts: Vec<StatementContext>,
         scope: SharedScope,
     ) -> Result<(), CompileError> {
-        let scope_idx = scope.metadata.idx();
-        self.tape.event_scope_enter(scope_idx);
-
         for stmt in stmts {
             self.handle_statement(stmt, scope.clone())?;
         }
 
-        self.tape.event_scope_drop(scope_idx);
         Ok(())
     }
 
@@ -66,14 +64,15 @@ impl Lowerer {
         match stmt.kind {
             StatementKind::Declare { ident, sigid, expr } => {
                 let dst = Operand::persistent();
-
                 let reg = self
                     .memory
                     .alloc()
                     .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
 
-                let var = Symbol::new(ident.clone(), Location::Reg(reg), sigid);
-                self.scopes.define_symbol(SymbolId(dst.into()), var);
+                self.scopes.define_symbol(
+                    SymbolId(dst.into()),
+                    Symbol::new(ident.clone(), Location::Reg(reg), sigid),
+                );
 
                 let opr = self
                     .proc_expr(&expr, Some(dst))
@@ -112,10 +111,14 @@ impl Lowerer {
                 }
             }
             StatementKind::Out(signal) => match signal.value {
-                SignalValue::Num(scalar) => {
+                Literal::Integer(scalar) => {
                     self.tape.out(Operand::Imm(scalar), signal.id);
                 }
-                SignalValue::Var(ident) => {
+                Literal::Bool(bool) => {
+                    let scalar = bool as i32;
+                    self.tape.out(Operand::Imm(scalar), signal.id);
+                }
+                Literal::Ident(ident) => {
                     if let Some(SymbolHandle { sid, .. }) = self.scopes.lookup(&ident) {
                         let target = Operand::Persistent(sid);
 
@@ -192,41 +195,38 @@ impl Lowerer {
                 }
             }
             StatementKind::Loop { body } => {
-                let label = Label::raw(Label::LOOP);
-                let loop_start = label.suffix("start");
-                let loop_end = label.suffix("finish");
+                let loop_label = Label::raw(Label::LOOP);
 
                 let loop_scope = self.scopes.enter_scope_explicit(
                     Some(parent.metadata.idx()),
                     ScopeMetadataBuilder::default()
                         .kind(ScopeKind::Loop)
-                        .exit_label(loop_end.clone())
+                        .exit_label(loop_label.end())
                         .build()
                         .unwrap(),
                 );
 
-                self.tape.label(loop_start.clone());
+                self.tape.label(loop_label.init());
                 self.handle_statements(body, loop_scope.clone())?;
-                self.tape.jump(loop_start, None);
-                self.tape.label(loop_end);
+                self.tape.jump(loop_label.init(), None);
+                self.tape.label(loop_label.end());
 
                 self.scopes.leave_current();
             }
+
             StatementKind::While { cond, body } => {
-                let label = Label::raw(Label::WHILE);
-                let start = label.suffix("start");
-                let finish = label.suffix("finish");
+                let while_label = Label::raw(Label::WHILE);
 
                 let while_scope = self.scopes.enter_scope_explicit(
                     Some(parent.metadata.idx()),
                     ScopeMetadataBuilder::default()
                         .kind(ScopeKind::While)
-                        .exit_label(finish.clone())
+                        .exit_label(while_label.end())
                         .build()
                         .unwrap(),
                 );
 
-                self.tape.label(start.clone());
+                self.tape.label(while_label.init());
                 self.handle_statements(body, while_scope)?;
 
                 let dst = self
@@ -234,11 +234,60 @@ impl Lowerer {
                     .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
 
                 self.tape.test_eq(dst, Operand::Imm(1));
-                self.tape.jump(start, None);
-                self.tape.label(finish);
+                self.tape.jump(while_label.init(), None);
+                self.tape.label(while_label.end());
 
                 self.scopes.leave_current();
             }
+
+            StatementKind::For { iter, range, body } => {
+                let for_label = Label::raw(Label::FOR);
+                let for_scope = self.scopes.enter_scope_explicit(
+                    Some(parent.metadata.idx()),
+                    ScopeMetadataBuilder::default()
+                        .kind(ScopeKind::For)
+                        .build()
+                        .unwrap(),
+                );
+
+                let dst = Operand::persistent();
+                let reg = self
+                    .memory
+                    .alloc()
+                    .map_err(|k| CompileError::new(k, Some(stmt.span)))?;
+
+                self.scopes.define_symbol(
+                    SymbolId(dst.into()),
+                    Symbol::new(iter.clone(), Location::Reg(reg), None),
+                );
+
+                let contains_break = body.iter().find(|instr| instr.kind.is_break()).is_some();
+                let start = self
+                    .eval_literal(&range.start)
+                    .map_err(|kind| CompileError::new(kind, None))?;
+                let end = self
+                    .eval_literal(&range.end)
+                    .map_err(|kind| CompileError::new(kind, None))?;
+
+                self.tape.mov(dst, start);
+                self.tape.label(for_label.init());
+
+                self.handle_statements(body, for_scope.clone())?;
+                self.tape.inc(dst);
+
+                if range.inclusive {
+                    self.tape.br_ne(dst, end, for_label.init());
+                } else {
+                    self.tape.br_lt(dst, end, for_label.init());
+                }
+
+                if contains_break {
+                    self.tape.label(for_label.end());
+                }
+
+                self.scopes.leave_current();
+            }
+
             StatementKind::Block { body } => {
                 let local_scope = self.scopes.enter_scope(Some(parent.metadata.idx()));
                 self.handle_statements(body, local_scope)?;
@@ -272,21 +321,26 @@ impl Lowerer {
         Ok(())
     }
 
+    fn eval_literal(&self, literal: &Literal) -> Result<Operand, CompileErrorKind> {
+        match literal {
+            Literal::Integer(n) => Ok(Operand::immediate(*n)),
+            Literal::Bool(b) => Ok(Operand::immediate(*b as i32)),
+            Literal::Ident(ident) => match self.scopes.lookup(ident) {
+                Some(SymbolHandle { sid, .. }) => Ok(Operand::Persistent(sid)),
+                None => Err(CompileErrorKind::Semantic(
+                    SemanticError::UndefinedVariable(ident.to_string()),
+                )),
+            },
+        }
+    }
+
     fn proc_expr(
         &mut self,
         expr: &Expression,
         p_dst: Option<Operand>,
     ) -> Result<Operand, CompileErrorKind> {
         match expr {
-            Expression::Value(signal) => match &signal.value {
-                SignalValue::Num(n) => Ok(Operand::immediate(*n)),
-                SignalValue::Var(ident) => match self.scopes.lookup(ident) {
-                    Some(SymbolHandle { sid, .. }) => Ok(Operand::Persistent(sid)),
-                    None => Err(CompileErrorKind::Semantic(
-                        SemanticError::UndefinedVariable(ident.to_string()),
-                    )),
-                },
-            },
+            Expression::Value(signal) => self.eval_literal(&signal.value),
             Expression::BinOp { lhs, rhs, op } => {
                 let lhs = (*lhs).clone();
                 let rhs = (*rhs).clone();

@@ -31,6 +31,13 @@ impl IntoOptSpan for Option<Span> {
 
 // Statements
 
+#[derive(Debug, Clone)]
+pub struct Range {
+    pub start: Literal,
+    pub end: Literal,
+    pub inclusive: bool,
+}
+
 pub type Block = Vec<StatementContext>;
 
 #[derive(Debug, Clone, strum_macros::EnumIs)]
@@ -50,6 +57,12 @@ pub enum StatementKind {
         body: Block,
         cond: Expression,
     },
+    For {
+        iter: String,
+        range: Range,
+        body: Block,
+    },
+
     Break,
     Continue,
     Return {
@@ -230,25 +243,26 @@ pub enum OperationKind {
 // Signals
 
 #[derive(Debug, Clone)]
-pub enum SignalValue {
-    Num(i32),
-    Var(String),
+pub enum Literal {
+    Integer(i32),
+    Bool(bool),
+    Ident(String),
 }
 
-impl Default for SignalValue {
+impl Default for Literal {
     fn default() -> Self {
-        Self::Num(0)
+        Self::Integer(0)
     }
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct Signal {
-    pub value: SignalValue,
+    pub value: Literal,
     pub id: Option<crate::game::SignalId>,
 }
 
 impl Signal {
-    pub fn new(value: SignalValue, id: Option<crate::game::SignalId>) -> Self {
+    pub fn new(value: Literal, id: Option<crate::game::SignalId>) -> Self {
         Self { value, id }
     }
 }
@@ -258,8 +272,9 @@ impl TryInto<i32> for Signal {
 
     fn try_into(self) -> Result<i32, Self::Error> {
         match self.value {
-            SignalValue::Num(n) => Ok(n),
-            SignalValue::Var(_) => Err(CompileError::new(
+            Literal::Integer(n) => Ok(n),
+            Literal::Bool(b) => Ok(b as i32),
+            Literal::Ident(_) => Err(CompileError::new(
                 CompileErrorKind::Parse(ParseError::UnexpectedVariant),
                 None,
             )),
@@ -270,7 +285,7 @@ impl TryInto<i32> for Signal {
 impl From<i32> for Signal {
     fn from(value: i32) -> Self {
         Self {
-            value: SignalValue::Num(value),
+            value: Literal::Integer(value),
             id: None,
         }
     }
@@ -279,7 +294,7 @@ impl From<i32> for Signal {
 impl From<String> for Signal {
     fn from(v: String) -> Self {
         Self {
-            value: SignalValue::Var(v),
+            value: Literal::Ident(v),
             id: None,
         }
     }

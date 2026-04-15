@@ -1,5 +1,6 @@
 pub const KW_LET: &str = "let";
 pub const KW_OUT: &str = "out";
+pub const KW_IN: &str = "in";
 
 pub const KW_IF: &str = "if";
 pub const KW_ELSE: &str = "else";
@@ -13,9 +14,10 @@ pub const KW_CONTINUE: &str = "continue";
 pub const KW_TRUE: &str = "true";
 pub const KW_FALSE: &str = "false";
 
-pub const RESERVED_KEYWORDS: [&str; 11] = [
+pub const RESERVED_KEYWORDS: [&str; 12] = [
     KW_LET,
     KW_OUT,
+    KW_IN,
     KW_IF,
     KW_ELSE,
     KW_FOR,
@@ -41,6 +43,7 @@ pub const CH_NOT: char = '!';
 pub const CH_AND: char = '&';
 pub const CH_OR: char = '|';
 
+pub const CH_DOT: char = '.';
 pub const CH_COMMA: char = ',';
 pub const CH_COLON: char = ':';
 pub const CH_SEMICOLON: char = ';';

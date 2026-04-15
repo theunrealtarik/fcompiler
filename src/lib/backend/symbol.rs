@@ -1,6 +1,8 @@
 use super::mem::{Location, Register};
 use super::tags::*;
 use crate::game::SignalId;
+
+#[allow(unused_imports)]
 use crate::log;
 
 use std::collections::HashMap;
@@ -98,16 +100,20 @@ impl ScopeArena {
         }
     }
 
+    pub fn current_mut(&mut self) -> Option<&mut SharedScope> {
+        if let Some(idx) = self.stack.get(self.current - 1) {
+            self.table.get_mut(idx)
+        } else {
+            None
+        }
+    }
+
     pub fn set_current(&mut self, idx: usize) {
         if idx >= self.table.len() {
             panic!("index out of bounds");
         }
 
         self.current = idx;
-    }
-
-    pub fn current_mut(&mut self) -> Option<&mut SharedScope> {
-        self.table.get_mut(&self.current)
     }
 
     // resolve a symbol within a given scope based on its ident

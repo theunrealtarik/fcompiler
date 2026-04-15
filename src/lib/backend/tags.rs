@@ -23,7 +23,6 @@ impl std::ops::Deref for SymbolId {
 }
 
 lazy_static::lazy_static! {
-    static ref TEMP_ID_TRACK: Mutex<i32> = Mutex::new(0);
     static ref SYMB_ID_TRACK: Mutex<i32> = Mutex::new(0);
     static ref LBEL_ID_TRACK: Mutex<u32> = Mutex::new(0);
 }
@@ -48,7 +47,7 @@ impl Into<i32> for Operand {
 
 impl Operand {
     pub fn temp() -> Operand {
-        let mut guard = TEMP_ID_TRACK.lock().unwrap();
+        let mut guard = SYMB_ID_TRACK.lock().unwrap();
         let id = *guard;
         *guard += 1;
         Operand::Temp(TempId(id))
@@ -84,6 +83,7 @@ impl Label {
     pub const COND: &'static str = "cond";
     pub const LOOP: &'static str = "loop";
     pub const WHILE: &'static str = "while";
+    pub const FOR: &'static str = "for";
 
     pub fn new(kind: LabelKind) -> Self {
         let id = Self::id();
@@ -105,6 +105,14 @@ impl Label {
             },
             _ => unreachable!(),
         }
+    }
+
+    pub fn init(&self) -> Self {
+        self.suffix("init")
+    }
+
+    pub fn end(&self) -> Self {
+        self.suffix("end")
     }
 
     fn sanitize(string: &str) -> String {

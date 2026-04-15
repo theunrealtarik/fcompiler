@@ -26,6 +26,7 @@ pub enum Token {
     // keywords
     Let,
     Out,
+    In,
     If,
     Else,
     For,
@@ -36,7 +37,7 @@ pub enum Token {
     Continue,
 
     // literals
-    Number(i32),
+    Integer(i32),
     Ident {
         name: String,
         sid: Option<String>,
@@ -103,6 +104,11 @@ pub enum Token {
     #[strum(serialize = ";")]
     Semicolon,
 
+    #[strum(serialize = "..")]
+    DotDot,
+    #[strum(serialize = "..=")]
+    DotDotEqual,
+
     // formatting?
     #[strum(serialize = " ")]
     Whitespace,
@@ -121,6 +127,7 @@ use super::ast::*;
 use super::lexemes;
 
 use crate::error::*;
+use crate::frontend::token;
 
 impl Token {
     pub fn tokenize(src: &str) -> Result<Vec<TokenContext>, CompileError> {
@@ -174,7 +181,9 @@ impl Token {
                     let token = match ident.as_str() {
                         KW_LET => Token::Let,
                         KW_OUT => Token::Out,
+                        KW_IN => Token::In,
                         KW_IF => Token::If,
+                        KW_FOR => Token::For,
                         KW_LOOP => Token::Loop,
                         KW_WHILE => Token::While,
                         KW_BREAK => Token::Break,
@@ -222,9 +231,28 @@ impl Token {
                     }
 
                     tokens.push(TokenContext {
-                        kind: Token::Number(num),
+                        kind: Token::Integer(num),
                         span: Some(span),
                     });
+                }
+                CH_DOT => {
+                    chars.next();
+
+                    if chars.peek() == Some(&'.') {
+                        chars.next();
+
+                        let token = if chars.peek() == Some(&'=') {
+                            chars.next();
+                            Token::DotDotEqual
+                        } else {
+                            Token::DotDot
+                        };
+
+                        tokens.push(TokenContext {
+                            kind: token,
+                            span: Some(span),
+                        });
+                    }
                 }
                 CH_LCURLY | CH_RCURLY => {
                     tokens.push(TokenContext {
@@ -390,7 +418,7 @@ impl<'a> Expresso<'a> {
             let span = token.span;
 
             match &token.kind {
-                Token::Number(n) => Ok(Expression::Value(Signal::from(*n))),
+                Token::Integer(n) => Ok(Expression::Value(Signal::from(*n))),
                 Token::Ident { name, .. } => Ok(Expression::Value(Signal::from(name.to_string()))),
                 Token::Boolean(b) => Ok(Expression::Value(Signal::from(*b as i32))),
                 Token::LParen => {
